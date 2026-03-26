@@ -1,0 +1,6 @@
+station_id,name,latitude,longitude,region,elevation_m
+RU-001,Moscow (VDNKh),55.8263,37.6365,Central,150
+RU-002,Saint Petersburg,59.9343,30.3351,North-West,3
+KZ-001,Almaty,43.2567,76.9286,Central Asia,760
+CN-001,Beijing,39.9042,116.4074,East Asia,43
+JP-001,Tokyo,35.6762,139.6503,East Asia,40

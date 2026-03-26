@@ -1,0 +1,6 @@
+id,username,email,password_hash,full_name,created_at
+1,admin,admin@climatic.ui,$2b$12$8rZmfoM5KcwxdlLuV9YT.uGbFsHRKd75J3TTJNTItiRlVpiqexZ.S,Администратор,2026-01-01
+2,testuser,test@test.com,$2b$12$8rZmfoM5KcwxdlLuV9YT.uGbFsHRKd75J3TTJNTItiRlVpiqexZ.S,Тестовый Пользователь,2026-01-15
+3,meteorolog,meteorolog@climatic.ui,$2b$12$8rZmfoM5KcwxdlLuV9YT.uGbFsHRKd75J3TTJNTItiRlVpiqexZ.S,Иван Петров,2026-02-01
+4,analyst,analyst@climatic.ui,$2b$12$8rZmfoM5KcwxdlLuV9YT.uGbFsHRKd75J3TTJNTItiRlVpiqexZ.S,Анна Смирнова,2026-02-10
+5,tkzSeido,rozhin_sasha@inbox.ru,$2b$12$8RslGRfltDq/rCv2Zp0HlO9IAQyFj.Spg2IkXXx2cT2gily/.Wgzq,Алекс Алексов,2026-03-26
