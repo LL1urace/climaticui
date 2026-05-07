@@ -1,0 +1,11 @@
+services:
+  frontend:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      BACKEND_API_URL: ${BACKEND_API_URL:-http://host.docker.internal:8000/api/v1}
+      APP_TITLE: ${APP_TITLE:-КлиматикА}
+      APP_ENV: ${APP_ENV:-dev}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-30}
+
