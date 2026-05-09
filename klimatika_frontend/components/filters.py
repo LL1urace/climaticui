@@ -20,24 +20,61 @@ AGGREGATIONS = {
 
 
 def load_climate_zones() -> list[dict]:
+    """Загружает и кэширует климатические зоны.
+
+    Returns:
+        Список климатических зон.
+
+    Raises:
+        ApiError: Если backend вернул ошибку загрузки справочника.
+    """
+
     if st.session_state.get("cached_climate_zones") is None:
         st.session_state["cached_climate_zones"] = unwrap_records(dictionaries.get_climate_zones())
     return st.session_state["cached_climate_zones"]
 
 
 def load_stations() -> list[dict]:
+    """Загружает и кэширует список метеостанций.
+
+    Returns:
+        Список метеостанций.
+
+    Raises:
+        ApiError: Если backend вернул ошибку загрузки справочника.
+    """
+
     if st.session_state.get("cached_stations") is None:
         st.session_state["cached_stations"] = unwrap_records(dictionaries.get_stations())
     return st.session_state["cached_stations"]
 
 
 def load_parameters() -> list[dict]:
+    """Загружает и кэширует список климатических параметров.
+
+    Returns:
+        Список климатических параметров.
+
+    Raises:
+        ApiError: Если backend вернул ошибку загрузки справочника.
+    """
+
     if st.session_state.get("cached_parameters") is None:
         st.session_state["cached_parameters"] = unwrap_records(dictionaries.get_parameters())
     return st.session_state["cached_parameters"]
 
 
 def select_station(stations: list[dict], key: str = "station_select") -> Any:
+    """Отображает selectbox выбора одной метеостанции.
+
+    Args:
+        stations: Список станций из backend API.
+        key: Уникальный ключ Streamlit-виджета.
+
+    Returns:
+        Идентификатор выбранной станции или None.
+    """
+
     if not stations:
         st.warning("Backend не вернул список станций.")
         return None
@@ -48,13 +85,37 @@ def select_station(stations: list[dict], key: str = "station_select") -> Any:
     return st.selectbox("Метеостанция", options=options, index=index, format_func=lambda item_id: station_label(by_id[item_id]), key=key)
 
 
-def multiselect_stations(stations: list[dict], key: str = "station_multiselect") -> list[Any]:
+def multiselect_stations(stations: list[dict], key: str = "station_multiselect", default_ids: list[Any] | None = None) -> list[Any]:
+    """Отображает multiselect выбора нескольких метеостанций.
+
+    Args:
+        stations: Список станций из backend API.
+        key: Уникальный ключ Streamlit-виджета.
+        default_ids: Идентификаторы станций, выбранные по умолчанию.
+
+    Returns:
+        Список идентификаторов выбранных станций.
+    """
+
     options = [station_id(station) for station in stations]
     by_id = {station_id(station): station for station in stations}
-    return st.multiselect("Метеостанции", options=options, format_func=lambda item_id: station_label(by_id[item_id]), key=key)
+    stored_default = default_ids if default_ids is not None else st.session_state.get("dashboard_station_ids") or []
+    default = [item_id for item_id in stored_default if item_id in options]
+    return st.multiselect("Метеостанции", options=options, default=default, format_func=lambda item_id: station_label(by_id[item_id]), key=key)
 
 
 def select_parameter(parameters: list[dict], key: str = "parameter_select", label: str = "Параметр") -> Any:
+    """Отображает selectbox выбора климатического параметра.
+
+    Args:
+        parameters: Список параметров из backend API.
+        key: Уникальный ключ Streamlit-виджета.
+        label: Подпись поля выбора.
+
+    Returns:
+        Идентификатор выбранного параметра или None.
+    """
+
     if not parameters:
         st.warning("Backend не вернул список параметров.")
         return None
@@ -66,17 +127,62 @@ def select_parameter(parameters: list[dict], key: str = "parameter_select", labe
 
 
 def select_aggregation(key: str = "aggregation_select") -> str:
-    return st.selectbox("Агрегация", options=list(AGGREGATIONS), format_func=lambda item: AGGREGATIONS[item], index=1, key=key)
+    """Отображает выбор типа агрегации временного ряда.
+
+    Args:
+        key: Уникальный ключ Streamlit-виджета.
+
+    Returns:
+        Код выбранной агрегации.
+    """
+
+    options = list(AGGREGATIONS)
+    default = st.session_state.get("dashboard_aggregation")
+    index = options.index(default) if default in options else 1
+    return st.selectbox("Агрегация", options=options, format_func=lambda item: AGGREGATIONS[item], index=index, key=key)
 
 
-def date_period(prefix: str = "period", default_start: date | None = None, default_end: date | None = None) -> tuple[date, date]:
+def date_period(
+    prefix: str = "period",
+    default_start: date | None = None,
+    default_end: date | None = None,
+    allow_empty: bool = False,
+) -> tuple[date | None, date | None]:
+    """Отображает два поля выбора дат периода.
+
+    Args:
+        prefix: Префикс ключей Streamlit-виджетов.
+        default_start: Начальная дата по умолчанию.
+        default_end: Конечная дата по умолчанию.
+        allow_empty: Разрешает пустые значения дат без автоподстановки.
+
+    Returns:
+        Кортеж из начальной и конечной даты или None для пустых полей.
+    """
+
     today = date.today()
-    start = st.date_input("Начало периода", value=default_start or date(today.year - 5, 1, 1), key=f"{prefix}_date_from")
-    end = st.date_input("Конец периода", value=default_end or today, key=f"{prefix}_date_to")
+    stored_start = None if allow_empty else st.session_state.get("dashboard_date_from")
+    stored_end = None if allow_empty else st.session_state.get("dashboard_date_to")
+    fallback_start = None if allow_empty else date(today.year - 5, 1, 1)
+    fallback_end = None if allow_empty else today
+    start = st.date_input("Начало периода", value=default_start or stored_start or fallback_start, key=f"{prefix}_date_from")
+    end = st.date_input("Конец периода", value=default_end or stored_end or fallback_end, key=f"{prefix}_date_to")
     return start, end
 
 
 def common_filters(prefix: str = "filters") -> dict[str, Any]:
+    """Отображает общий набор фильтров анализа.
+
+    Args:
+        prefix: Префикс ключей Streamlit-виджетов.
+
+    Returns:
+        Словарь выбранных фильтров и загруженных справочников.
+
+    Raises:
+        ApiError: Если backend вернул ошибку загрузки справочников.
+    """
+
     stations = load_stations()
     parameters = load_parameters()
     station = select_station(stations, key=f"{prefix}_station")
@@ -95,6 +201,12 @@ def common_filters(prefix: str = "filters") -> dict[str, Any]:
 
 
 def analysis_methods() -> list[str]:
+    """Отображает выбор методов анализа временного ряда.
+
+    Returns:
+        Список кодов выбранных методов анализа.
+    """
+
     return st.multiselect(
         "Методы анализа",
         options=[
@@ -112,6 +224,15 @@ def analysis_methods() -> list[str]:
 
 
 def analysis_options(prefix: str = "analysis") -> dict[str, Any]:
+    """Отображает дополнительные параметры методов анализа.
+
+    Args:
+        prefix: Префикс ключей Streamlit-виджетов.
+
+    Returns:
+        Словарь options для `POST /analysis/run`.
+    """
+
     window = st.number_input("Окно скользящего среднего", min_value=2, max_value=120, value=12, step=1, key=f"{prefix}_ma_window")
     norm_start, norm_end = date_period(prefix=f"{prefix}_norm")
     return {
@@ -123,6 +244,16 @@ def analysis_options(prefix: str = "analysis") -> dict[str, Any]:
 
 
 def render_availability(station: Any, parameter: Any) -> None:
+    """Отображает доступный период наблюдений для выбранной пары.
+
+    Args:
+        station: Идентификатор станции.
+        parameter: Идентификатор параметра.
+
+    Returns:
+        None.
+    """
+
     if not station or not parameter:
         return
     try:
@@ -139,4 +270,13 @@ def render_availability(station: Any, parameter: Any) -> None:
 
 
 def validate_common_filters(filters: dict[str, Any]) -> ValidationResult:
+    """Проверяет обязательные поля общего набора фильтров.
+
+    Args:
+        filters: Словарь фильтров страницы.
+
+    Returns:
+        Результат валидации обязательных полей.
+    """
+
     return validate_required_filters(filters.get("station_id"), filters.get("parameter_id"), filters.get("date_from"), filters.get("date_to"))

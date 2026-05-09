@@ -11,6 +11,16 @@ from klimatika_frontend.utils.formatters import to_dataframe
 
 
 def render_table(payload: Any, empty_message: str = "Данные для таблицы отсутствуют.") -> None:
+    """Отображает JSON-данные или DataFrame в табличном виде.
+
+    Args:
+        payload: Данные для таблицы.
+        empty_message: Сообщение для пустого состояния.
+
+    Returns:
+        None.
+    """
+
     if isinstance(payload, pd.DataFrame):
         df = payload
     elif isinstance(payload, dict) and all(not isinstance(v, (dict, list)) for v in payload.values()):
@@ -25,6 +35,16 @@ def render_table(payload: Any, empty_message: str = "Данные для таб�
 
 
 def render_json_preview(payload: Any, title: str = "JSON") -> None:
+    """Отображает JSON-данные в раскрывающемся блоке.
+
+    Args:
+        payload: Данные для JSON-просмотра.
+        title: Заголовок раскрывающегося блока.
+
+    Returns:
+        None.
+    """
+
     with st.expander(title, expanded=False):
         st.json(payload)
 

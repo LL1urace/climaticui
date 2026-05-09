@@ -11,9 +11,15 @@ from klimatika_frontend.state.session import clear_auth_state, is_authenticated
 
 
 def render_sidebar() -> None:
+    """Отображает sidebar с логотипом, пользователем и статусом API.
+
+    Returns:
+        None.
+    """
+
     settings = get_settings()
     with st.sidebar:
-        st.image("assets/logo.png", width=84)
+        st.image("assets/logo.png", width=59)
         st.title(settings.app_title)
         st.caption("Frontend клиент к backend API")
 
@@ -23,12 +29,26 @@ def render_sidebar() -> None:
             st.write(user.get("full_name") or user.get("email") or "Пользователь")
             if user.get("email"):
                 st.caption(user["email"])
+            st.markdown(
+                """
+                <style>
+                section[data-testid="stSidebar"] div[data-testid="stButton"] button,
+                section[data-testid="stSidebar"] div[data-testid="stButton"] button * {
+                    color: #07111f !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
             if st.button("Выйти", use_container_width=True):
                 clear_auth_state()
                 st.rerun()
 
         st.divider()
-        st.caption(f"Backend: `{settings.backend_api_url}`")
+        if settings.use_sample_data:
+            st.caption("Режим данных: `sample`")
+        else:
+            st.caption(f"Backend: `{settings.backend_api_url}`")
         try:
             health = get_health()
             status = health.get("status", "ok") if isinstance(health, dict) else "ok"

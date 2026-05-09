@@ -7,7 +7,7 @@ from klimatika_frontend.api.client import ApiError
 from klimatika_frontend.components.charts import render_overlay_chart, render_timeseries_chart
 from klimatika_frontend.components.errors import render_api_error, render_method_errors
 from klimatika_frontend.components.filters import analysis_methods, analysis_options, common_filters, render_availability, validate_common_filters
-from klimatika_frontend.components.layout import page_title, setup_page
+from klimatika_frontend.components.layout import page_title, render_home_button, setup_page
 from klimatika_frontend.components.metrics_cards import render_metric_cards
 from klimatika_frontend.components.sidebar import render_sidebar
 from klimatika_frontend.components.tables import render_json_preview, render_table
@@ -16,6 +16,16 @@ from klimatika_frontend.utils.formatters import result_payload
 
 
 def method_payload(results: dict, name: str) -> dict:
+    """Возвращает результат конкретного метода анализа из общего JSON.
+
+    Args:
+        results: Словарь результатов анализа, полученный от backend API.
+        name: Код метода анализа.
+
+    Returns:
+        Словарь payload метода или пустой словарь, если данных нет.
+    """
+
     payload = results.get(name)
     if isinstance(payload, dict) and isinstance(payload.get("result"), dict):
         return payload["result"]
@@ -27,6 +37,7 @@ init_session_state()
 require_auth()
 render_sidebar()
 page_title("Анализ временного ряда", "Выберите станцию, параметр, период и методы. Расчёты выполняет backend.")
+render_home_button()
 
 try:
     with st.sidebar:

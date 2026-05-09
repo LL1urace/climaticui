@@ -7,7 +7,7 @@ import streamlit as st
 from klimatika_frontend.api import analysis, reports
 from klimatika_frontend.api.client import ApiError
 from klimatika_frontend.components.errors import render_api_error
-from klimatika_frontend.components.layout import page_title, setup_page
+from klimatika_frontend.components.layout import page_title, render_home_button, setup_page
 from klimatika_frontend.components.sidebar import render_sidebar
 from klimatika_frontend.components.tables import render_json_preview, render_table
 from klimatika_frontend.state.session import init_session_state, require_auth
@@ -19,6 +19,7 @@ init_session_state()
 require_auth()
 render_sidebar()
 page_title("Отчёты", "Формирование и скачивание отчётов выполняет backend.")
+render_home_button()
 
 last_run_id = st.session_state.get("last_analysis_run_id")
 selected_run_id = last_run_id

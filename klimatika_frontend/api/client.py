@@ -10,6 +10,16 @@ import httpx
 
 @dataclass
 class ApiError(Exception):
+    """Описывает нормализованную ошибку backend API.
+
+    Attributes:
+        message: Пользовательское сообщение об ошибке.
+        status_code: HTTP-статус ответа, если он известен.
+        code: Машинный код ошибки backend.
+        context: Дополнительный контекст ошибки.
+        raw: Исходный ответ backend или его часть.
+    """
+
     message: str
     status_code: int | None = None
     code: str | None = None
@@ -17,11 +27,27 @@ class ApiError(Exception):
     raw: Any = None
 
     def __str__(self) -> str:
+        """Формирует строковое представление ошибки.
+
+        Returns:
+            Сообщение ошибки с кодом, если он указан.
+        """
+
         prefix = f"{self.code}: " if self.code else ""
         return f"{prefix}{self.message}"
 
 
 class ApiClient:
+    """Выполняет HTTP-запросы к backend API и нормализует ошибки.
+
+    Attributes:
+        base_url: Базовый URL backend API.
+        token: JWT-токен для защищённых запросов.
+        timeout: Таймаут HTTP-запроса в секундах.
+        transport: Транспорт httpx, используемый в тестах.
+        on_unauthorized: Callback для обработки ответа 401.
+    """
+
     def __init__(
         self,
         base_url: str,
@@ -30,6 +56,19 @@ class ApiClient:
         transport: httpx.BaseTransport | None = None,
         on_unauthorized: Callable[[], None] | None = None,
     ) -> None:
+        """Инициализирует API-клиент.
+
+        Args:
+            base_url: Базовый URL backend API.
+            token: JWT-токен пользователя.
+            timeout: Таймаут HTTP-запросов в секундах.
+            transport: Пользовательский транспорт httpx.
+            on_unauthorized: Callback при HTTP 401.
+
+        Returns:
+            None.
+        """
+
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
@@ -37,12 +76,51 @@ class ApiClient:
         self.on_unauthorized = on_unauthorized
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """Выполняет GET-запрос к backend API.
+
+        Args:
+            path: Путь endpoint относительно `base_url`.
+            params: Query-параметры запроса.
+
+        Returns:
+            Распарсенный JSON-ответ backend.
+
+        Raises:
+            ApiError: Если запрос завершился ошибкой.
+        """
+
         return self._request("GET", path, params=params)
 
     def post(self, path: str, json: dict[str, Any] | None = None) -> Any:
+        """Выполняет POST-запрос к backend API.
+
+        Args:
+            path: Путь endpoint относительно `base_url`.
+            json: JSON-тело запроса.
+
+        Returns:
+            Распарсенный JSON-ответ backend.
+
+        Raises:
+            ApiError: Если запрос завершился ошибкой.
+        """
+
         return self._request("POST", path, json=json)
 
     def download(self, path: str, params: dict[str, Any] | None = None) -> bytes:
+        """Скачивает бинарный ответ backend API.
+
+        Args:
+            path: Путь endpoint относительно `base_url`.
+            params: Query-параметры запроса.
+
+        Returns:
+            Содержимое ответа в байтах.
+
+        Raises:
+            ApiError: Если запрос завершился ошибкой.
+        """
+
         return self._request("GET", path, params=params, expect_bytes=True)
 
     def _request(
@@ -53,6 +131,22 @@ class ApiClient:
         json: dict[str, Any] | None = None,
         expect_bytes: bool = False,
     ) -> Any:
+        """Выполняет HTTP-запрос и приводит ответ к JSON или bytes.
+
+        Args:
+            method: HTTP-метод.
+            path: Путь endpoint относительно `base_url`.
+            params: Query-параметры запроса.
+            json: JSON-тело запроса.
+            expect_bytes: Нужно ли вернуть ответ как bytes.
+
+        Returns:
+            JSON-ответ backend или байты файла.
+
+        Raises:
+            ApiError: Если backend недоступен, вернул ошибку или невалидный JSON.
+        """
+
         try:
             with httpx.Client(timeout=self.timeout, transport=self.transport) as client:
                 response = client.request(
@@ -90,17 +184,41 @@ class ApiClient:
             ) from exc
 
     def _headers(self) -> dict[str, str]:
+        """Создаёт HTTP-заголовки для запроса.
+
+        Returns:
+            Словарь HTTP-заголовков с JWT, если токен задан.
+        """
+
         headers = {"Accept": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
     def _url(self, path: str) -> str:
+        """Собирает абсолютный URL endpoint.
+
+        Args:
+            path: Путь endpoint относительно `base_url`.
+
+        Returns:
+            Абсолютный URL для HTTP-запроса.
+        """
+
         clean_path = path if path.startswith("/") else f"/{path}"
         return f"{self.base_url}{clean_path}"
 
     @staticmethod
     def _api_error_from_response(response: httpx.Response) -> ApiError:
+        """Преобразует HTTP-ошибку backend в `ApiError`.
+
+        Args:
+            response: Ответ httpx с ошибочным HTTP-статусом.
+
+        Returns:
+            Нормализованная ошибка API.
+        """
+
         try:
             payload = response.json()
         except ValueError:

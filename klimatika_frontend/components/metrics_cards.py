@@ -10,6 +10,16 @@ from klimatika_frontend.utils.formatters import format_metric_label, format_numb
 
 
 def render_metric_cards(metrics: dict[str, Any] | None, columns: int = 4) -> None:
+    """Отображает словарь числовых метрик в карточках Streamlit.
+
+    Args:
+        metrics: Словарь метрик из ответа backend.
+        columns: Максимальное количество колонок карточек.
+
+    Returns:
+        None.
+    """
+
     if not isinstance(metrics, dict) or not metrics:
         st.info("Метрики в ответе backend отсутствуют.")
         return

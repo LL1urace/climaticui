@@ -28,6 +28,15 @@ ERROR_HINTS = {
 
 
 def render_api_error(error: Exception | ApiError) -> None:
+    """Отображает ошибку API в пользовательском виде.
+
+    Args:
+        error: Исключение API или неожиданная ошибка.
+
+    Returns:
+        None.
+    """
+
     if isinstance(error, ApiError):
         if error.status_code == 401 or error.code == "UNAUTHORIZED":
             clear_auth_state()
@@ -53,6 +62,15 @@ def render_api_error(error: Exception | ApiError) -> None:
 
 
 def render_method_errors(results: dict[str, Any] | None) -> None:
+    """Отображает ошибки отдельных методов анализа.
+
+    Args:
+        results: JSON-словарь результатов анализа по методам.
+
+    Returns:
+        None.
+    """
+
     if not isinstance(results, dict):
         return
     failed = []
