@@ -20,6 +20,7 @@ DEFAULT_KEYS = {
     "dashboard_date_from": None,
     "dashboard_date_to": None,
     "dashboard_aggregation": "monthly",
+    "dashboard_map_show_only_selected": False,
     "report_selected_sections": None,
     "report_include_cover": True,
     "report_include_graphs": True,

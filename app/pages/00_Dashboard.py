@@ -492,14 +492,13 @@ _remember_dashboard_filters(selected_station_ids, date_from, date_to, aggregatio
 _render_slice_summary(selected_stations, date_from, date_to, aggregation)
 
 st.subheader("Карта метеостанций")
+if not selected_station_ids:
+    st.session_state["dashboard_map_show_only_selected"] = False
 show_only_selected_on_map = st.checkbox(
     "Показывать на карте только выбранные метеостанции",
-    value=bool(st.session_state.get("dashboard_map_show_only_selected", False)),
     disabled=not selected_station_ids,
     key="dashboard_map_show_only_selected",
 )
-if not selected_station_ids:
-    show_only_selected_on_map = False
 st.caption(
     "Кликните по точке, чтобы выбрать метеостанцию. "
     "Оранжевые точки - выбранные станции, синие - доступные станции справочника."
