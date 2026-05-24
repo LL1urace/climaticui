@@ -201,18 +201,20 @@ def _id_key(value: Any) -> str:
     return str(value)
 
 
-def _map_selection_key(selected_station_ids: list[Any]) -> str:
+def _map_selection_key(selected_station_ids: list[Any], show_only_selected: bool = False) -> str:
     """Формирует ключ карты, зависящий от текущего выбора станций.
 
     Args:
         selected_station_ids: Текущий список выбранных метеостанций.
+        show_only_selected: Скрыты ли невыбранные станции.
 
     Returns:
         Уникальный ключ виджета карты для текущего состояния выбора.
     """
 
     suffix = "_".join(_id_key(item_id) for item_id in selected_station_ids) or "empty"
-    return f"dashboard_stations_map_{suffix}"
+    mode = "selected_only" if show_only_selected else "all"
+    return f"dashboard_stations_map_{mode}_{suffix}"
 
 
 def _next_station_selection(current_ids: list[Any], map_ids: list[Any] | None) -> list[Any] | None:
@@ -490,13 +492,25 @@ _remember_dashboard_filters(selected_station_ids, date_from, date_to, aggregatio
 _render_slice_summary(selected_stations, date_from, date_to, aggregation)
 
 st.subheader("Карта метеостанций")
-st.caption("Кликните по точке, чтобы выбрать метеостанцию. Тёмные точки - выбранные станции, синие - доступные станции справочника.")
+show_only_selected_on_map = st.checkbox(
+    "Показывать на карте только выбранные метеостанции",
+    value=bool(st.session_state.get("dashboard_map_show_only_selected", False)),
+    disabled=not selected_station_ids,
+    key="dashboard_map_show_only_selected",
+)
+if not selected_station_ids:
+    show_only_selected_on_map = False
+st.caption(
+    "Кликните по точке, чтобы выбрать метеостанцию. "
+    "Оранжевые точки - выбранные станции, синие - доступные станции справочника."
+)
 map_selected_station_ids = render_stations_map(
     stations,
     selected_ids=selected_station_ids,
     selectable=True,
-    selection_key=_map_selection_key(selected_station_ids),
+    selection_key=_map_selection_key(selected_station_ids, show_only_selected_on_map),
     selection_mode="multi-object",
+    show_only_selected=show_only_selected_on_map,
 )
 if st.session_state.pop("dashboard_ignore_next_map_selection", False):
     map_selected_station_ids = None

@@ -218,6 +218,7 @@ def render_stations_map(
     selection_key: str = "stations_map_selection",
     selection_mode: str = "multi-object",
     show_selection_details: bool = False,
+    show_only_selected: bool = False,
 ) -> list[Any] | None:
     """Отображает карту станций через PyDeck.
 
@@ -229,6 +230,7 @@ def render_stations_map(
         selection_key: Уникальный ключ интерактивной карты Streamlit.
         selection_mode: Режим выбора объектов PyDeck.
         show_selection_details: Отображает карточку с выбранными на карте станциями.
+        show_only_selected: Скрывает все станции, кроме выбранных.
 
     Returns:
         Список идентификаторов выбранных на карте станций или None.
@@ -259,8 +261,14 @@ def render_stations_map(
     }
     selected = {str(item_id) for item_id in selected_ids or []}
     df["_selected"] = df["_station_id"].isin(selected)
-    df["_color"] = df["_selected"].apply(lambda item: [7, 17, 31, 230] if item else [13, 100, 216, 165])
-    df["_radius"] = df["_selected"].apply(lambda item: 70000 if item else 42000)
+    if show_only_selected:
+        df = df[df["_selected"]].copy()
+        if df.empty:
+            st.info("Выберите станции, чтобы отобразить их на карте.")
+            return None
+
+    df["_color"] = df["_selected"].apply(lambda item: [245, 158, 11, 235] if item else [13, 100, 216, 165])
+    df["_radius"] = 48000
     df["tooltip"] = df.apply(
         lambda row: (
             f"{_safe_display(row.get('name', 'Станция'))}<br>{_safe_display(value_key)}: {_safe_display(row.get(value_key))}"
