@@ -39,5 +39,5 @@ dist/
 # Local data and generated outputs
 *.log
 *.tmp
-reports/
+/reports/
 downloads/

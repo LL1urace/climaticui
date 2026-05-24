@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from klimatika_frontend.utils.validators import periods_overlap, validate_min_stations, validate_period, validate_required_filters
+from app.utils.validators import periods_overlap, validate_min_stations, validate_period, validate_required_filters
 
 
 def test_validate_period_rejects_reversed_dates() -> None:

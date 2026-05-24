@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from klimatika_frontend.utils.formatters import format_date, parameter_label, station_label, to_dataframe, unwrap_records
+from app.utils.formatters import format_date, parameter_label, station_label, to_dataframe, unwrap_records
 
 
 def test_unwrap_records_accepts_list_and_wrapped_items() -> None:

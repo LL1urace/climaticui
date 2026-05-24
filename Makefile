@@ -1,5 +1,5 @@
 COMPOSE ?= docker compose
-SERVICE ?= frontend
+SERVICE ?= app
 PORT ?= 8501
 
 .PHONY: help build up up-build down restart logs ps shell test local-install local-run clean
@@ -8,13 +8,13 @@ help:
 	@echo "КлиматикА frontend commands"
 	@echo ""
 	@echo "  make build         Build Docker image"
-	@echo "  make up            Start frontend container"
-	@echo "  make up-build      Build and start frontend container"
+	@echo "  make up            Start app container"
+	@echo "  make up-build      Build and start app container"
 	@echo "  make down          Stop and remove containers"
-	@echo "  make restart       Restart frontend container"
-	@echo "  make logs          Follow frontend logs"
+	@echo "  make restart       Restart app container"
+	@echo "  make logs          Follow app logs"
 	@echo "  make ps            Show compose services"
-	@echo "  make shell         Open shell in frontend container"
+	@echo "  make shell         Open shell in app container"
 	@echo "  make test          Run pytest in container"
 	@echo "  make local-install Install local Python deps"
 	@echo "  make local-run     Run Streamlit locally"
@@ -48,10 +48,10 @@ test:
 	$(COMPOSE) run --rm $(SERVICE) pytest
 
 local-install:
-	python -m pip install -r requirements.txt
+	poetry install
 
 local-run:
-	streamlit run app.py --server.port $(PORT)
+	poetry run streamlit run app/main.py --server.port $(PORT)
 
 clean:
 	python -c "import shutil; from pathlib import Path; [shutil.rmtree(p, ignore_errors=True) for p in Path('.').rglob('__pycache__')]; shutil.rmtree('.pytest_cache', ignore_errors=True)"

@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from klimatika_frontend.api.client import ApiClient, ApiError
+from app.api.client import ApiClient, ApiError
 
 
 def make_client(handler, token: str | None = "token") -> ApiClient:

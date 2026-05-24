@@ -1,9 +1,9 @@
 services:
-  frontend:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: klimatika-frontend
+    container_name: klimatika-app
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-8501}:8501"

@@ -40,10 +40,8 @@ USE_SAMPLE_DATA=false
 ## Локальный запуск
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-streamlit run app.py
+poetry install
+poetry run streamlit run app/main.py
 ```
 
 Frontend будет доступен на `http://localhost:8501`.
@@ -86,15 +84,16 @@ pytest
 
 ## Основные страницы
 
-- `app.py`: вход, регистрация, статус backend и презентационное описание приложения.
-- `pages/00_Dashboard.py`: единый выбор периода, параметра, метеостанций, карта и переходы к возможностям анализа.
-- `pages/01_Analysis.py`: запуск основного анализа временного ряда.
-- `pages/02_Period_Comparison.py`: сравнение двух периодов.
-- `pages/03_Station_Comparison.py`: сравнение нескольких станций и карта.
-- `pages/04_Climatogram.py`: температура и осадки по месяцам.
-- `pages/05_Forecasting.py`: исследовательский прогноз через backend.
-- `pages/06_Analysis_History.py`: история и открытие результата анализа.
-- `pages/07_Reports.py`: создание и скачивание отчётов.
+- `app/main.py`: вход, регистрация, статус backend и презентационное описание приложения.
+- `app/pages/00_Dashboard.py`: единый выбор периода, метеостанций, карта и переходы к возможностям анализа.
+- `app/pages/01_Analysis.py`: запуск основного анализа временного ряда.
+- `app/pages/02_Period_Comparison.py`: сравнение двух периодов.
+- `app/pages/03_Station_Comparison.py`: сравнение нескольких станций и карта.
+- `app/pages/04_Climatogram.py`: температура и осадки по месяцам.
+- `app/pages/05_Forecasting.py`: исследовательский прогноз через backend.
+- `app/pages/06_Analysis_History.py`: история и открытие результата анализа.
+- `app/pages/07_Reports.py`: создание и скачивание отчётов.
+- `app/pages/08_Correlation.py`: корреляционный анализ нескольких климатических параметров.
 
 ## Backend endpoints
 
