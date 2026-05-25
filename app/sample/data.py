@@ -5,7 +5,8 @@ from __future__ import annotations
 import csv
 from datetime import date, datetime
 import math
-from pathlib import Path
+
+from app.sample.storage import SAMPLE_DATA_DIR, load_stations_from_sqlite
 
 
 SAMPLE_USER = {
@@ -226,7 +227,8 @@ PARAMETERS = [
 ]
 
 
-SAMPLE_DATA_DIR = Path(__file__).resolve().parent / "data"
+BUILTIN_SAMPLE_STATION_IDS = {int(station["id"]) for station in STATIONS}
+STATIONS = load_stations_from_sqlite(STATIONS)
 ARCTIC_MONTHLY_CSV = SAMPLE_DATA_DIR / "arctic_meteostat_monthly_1995_2024.csv"
 TEMPERATURE_PROFILES = {
     1: [-8.2, -6.4, -0.4, 7.4, 14.8, 18.6, 20.5, 18.7, 12.8, 5.9, -0.6, -5.4],
@@ -412,6 +414,61 @@ def _real_monthly_observations(start_id: int = 1) -> list[dict]:
     return observations
 
 
+def generated_observations_for_station(
+    station: dict,
+    parameter_id: int | str | None = None,
+    start_id: int = 1,
+) -> list[dict]:
+    """Генерирует sample-наблюдения для одной станции.
+
+    Args:
+        station: Запись метеостанции.
+        parameter_id: Идентификатор параметра или None для всех параметров.
+        start_id: Первый идентификатор создаваемого наблюдения.
+
+    Returns:
+        Список наблюдений за 2020-2024 годы.
+    """
+
+    observations: list[dict] = []
+    observation_id = start_id
+    station_identifier = station["id"]
+    selected_parameter_id = int(parameter_id) if parameter_id is not None else None
+    temperature_profile = _temperature_profile(station)
+    precipitation_profile = _precipitation_profile(station)
+    for year in range(2020, 2025):
+        for month in range(1, 13):
+            month_index = month - 1
+            trend = (year - 2020) * 0.18
+            year_wave = math.sin((year - 2019) * 1.7 + month * 0.41)
+            precipitation_wave = math.cos((year - 2018) * 1.3 + month * 0.73)
+            temperature_value = temperature_profile[month_index] + trend + year_wave * 0.35
+            precipitation_value = precipitation_profile[month_index] + precipitation_wave * 4.5
+            values = {
+                1: round(temperature_value, 2),
+                2: round(max(0, precipitation_value), 2),
+                3: round(62 + math.cos((month - 1) / 12 * 2 * math.pi) * 14 + len(str(station_identifier)) * 1.5, 2),
+                4: round(1010 + math.cos(month / 12 * 2 * math.pi) * 8 - len(str(station_identifier)) * 1.2, 2),
+            }
+            for current_parameter_id, value in values.items():
+                if selected_parameter_id is not None and current_parameter_id != selected_parameter_id:
+                    continue
+                observations.append(
+                    {
+                        "id": observation_id,
+                        "station_id": station_identifier,
+                        "parameter_id": current_parameter_id,
+                        "observed_at": date(year, month, 1).isoformat(),
+                        "value": value,
+                        "quality_flag": "sample",
+                        "source_name": "klimatika_sample",
+                        "created_at": datetime(2026, 1, 1).isoformat(),
+                    }
+                )
+                observation_id += 1
+    return observations
+
+
 def build_observations() -> list[dict]:
     """Генерирует детерминированные sample-наблюдения по ORM-структуре backend.
 
@@ -423,39 +480,12 @@ def build_observations() -> list[dict]:
     observation_id = len(observations) + 1
 
     for station in STATIONS:
-        if int(station["id"]) in REAL_MONTHLY_STATION_IDS:
+        station_id = int(station["id"])
+        if station_id in REAL_MONTHLY_STATION_IDS or station_id not in BUILTIN_SAMPLE_STATION_IDS:
             continue
-        temperature_profile = _temperature_profile(station)
-        precipitation_profile = _precipitation_profile(station)
-        for year in range(2020, 2025):
-            for month in range(1, 13):
-                station_id = station["id"]
-                month_index = month - 1
-                trend = (year - 2020) * 0.18
-                year_wave = math.sin((year - 2019) * 1.7 + month * 0.41)
-                precipitation_wave = math.cos((year - 2018) * 1.3 + month * 0.73)
-                temperature_value = temperature_profile[month_index] + trend + year_wave * 0.35
-                precipitation_value = precipitation_profile[month_index] + precipitation_wave * 4.5
-                values = {
-                    1: round(temperature_value, 2),
-                    2: round(max(0, precipitation_value), 2),
-                    3: round(62 + math.cos((month - 1) / 12 * 2 * math.pi) * 14 + len(str(station_id)) * 1.5, 2),
-                    4: round(1010 + math.cos(month / 12 * 2 * math.pi) * 8 - len(str(station_id)) * 1.2, 2),
-                }
-                for parameter_id, value in values.items():
-                    observations.append(
-                        {
-                            "id": observation_id,
-                            "station_id": station_id,
-                            "parameter_id": parameter_id,
-                            "observed_at": date(year, month, 1).isoformat(),
-                            "value": value,
-                            "quality_flag": "sample",
-                            "source_name": "klimatika_sample",
-                            "created_at": datetime(2026, 1, 1).isoformat(),
-                        }
-                    )
-                    observation_id += 1
+        station_observations = generated_observations_for_station(station, start_id=observation_id)
+        observations.extend(station_observations)
+        observation_id += len(station_observations)
     return observations
 
 

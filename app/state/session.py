@@ -21,6 +21,8 @@ DEFAULT_KEYS = {
     "dashboard_date_to": None,
     "dashboard_aggregation": "monthly",
     "dashboard_map_show_only_selected": False,
+    "dashboard_saved_set_mode": "dashboard",
+    "last_saved_analysis_sets": [],
     "report_selected_sections": None,
     "report_include_cover": True,
     "report_include_graphs": True,

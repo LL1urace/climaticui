@@ -12,6 +12,13 @@ import streamlit as st
 from app.utils.formatters import station_id, station_label, unwrap_records
 
 
+REAL_DATA_FLAGS = {"real_monthly", "sample_builtin", "builtin_real"}
+SYNTHETIC_SAMPLE_COLOR = [7, 54, 114, 170]
+REFERENCE_DATA_COLOR = [13, 100, 216, 165]
+SELECTED_STATION_COLOR = [245, 158, 11, 235]
+STATION_POINT_RADIUS = 34000
+
+
 def _station_record_id(record: dict) -> Any:
     """Возвращает идентификатор станции для карты.
 
@@ -44,6 +51,41 @@ def _safe_display(value: Any, fallback: str = "n/a") -> str:
     except (TypeError, ValueError):
         pass
     return escape(str(value))
+
+
+def _has_real_station_data(record: dict) -> bool:
+    """Проверяет, есть ли у станции реальные данные в sample-режиме.
+
+    Args:
+        record: Запись метеостанции для карты.
+
+    Returns:
+        True, если станция помечена как имеющая реальные monthly-данные.
+    """
+
+    if record.get("data_quality") in REAL_DATA_FLAGS:
+        return True
+    if str(record.get("quality_flag") or "").lower() in REAL_DATA_FLAGS:
+        return True
+    return bool(record.get("has_real_monthly_data"))
+
+
+def _station_color(record: dict) -> list[int]:
+    """Возвращает цвет точки станции на карте.
+
+    Args:
+        record: Запись станции с флагом `_selected`.
+
+    Returns:
+        RGBA-цвет для PyDeck.
+    """
+
+    if record.get("_selected"):
+        return SELECTED_STATION_COLOR
+    if _has_real_station_data(record):
+        return REFERENCE_DATA_COLOR
+    return SYNTHETIC_SAMPLE_COLOR
+
 
 
 def _get_event_value(source: Any, key: str) -> Any:
@@ -219,6 +261,7 @@ def render_stations_map(
     selection_mode: str = "multi-object",
     show_selection_details: bool = False,
     show_only_selected: bool = False,
+    initial_view_state: dict[str, Any] | None = None,
 ) -> list[Any] | None:
     """Отображает карту станций через PyDeck.
 
@@ -231,6 +274,7 @@ def render_stations_map(
         selection_mode: Режим выбора объектов PyDeck.
         show_selection_details: Отображает карточку с выбранными на карте станциями.
         show_only_selected: Скрывает все станции, кроме выбранных.
+        initial_view_state: Начальный вид карты PyDeck.
 
     Returns:
         Список идентификаторов выбранных на карте станций или None.
@@ -267,8 +311,8 @@ def render_stations_map(
             st.info("Выберите станции, чтобы отобразить их на карте.")
             return None
 
-    df["_color"] = df["_selected"].apply(lambda item: [245, 158, 11, 235] if item else [13, 100, 216, 165])
-    df["_radius"] = 48000
+    df["_color"] = df.apply(lambda row: _station_color(row.to_dict()), axis=1)
+    df["_radius"] = STATION_POINT_RADIUS
     df["tooltip"] = df.apply(
         lambda row: (
             f"{_safe_display(row.get('name', 'Станция'))}<br>{_safe_display(value_key)}: {_safe_display(row.get(value_key))}"
@@ -286,7 +330,13 @@ def render_stations_map(
         get_fill_color="_color",
         pickable=True,
     )
-    view_state = pdk.ViewState(latitude=float(df[lat_col].mean()), longitude=float(df[lon_col].mean()), zoom=3)
+    view_state = pdk.ViewState(
+        latitude=float(initial_view_state.get("latitude", df[lat_col].mean())) if initial_view_state else float(df[lat_col].mean()),
+        longitude=float(initial_view_state.get("longitude", df[lon_col].mean())) if initial_view_state else float(df[lon_col].mean()),
+        zoom=float(initial_view_state.get("zoom", 3)) if initial_view_state else 3,
+        pitch=float(initial_view_state.get("pitch", 0)) if initial_view_state else 0,
+        bearing=float(initial_view_state.get("bearing", 0)) if initial_view_state else 0,
+    )
     deck = pdk.Deck(layers=[layer], initial_view_state=view_state, tooltip={"html": "{tooltip}"})
 
     if not selectable:

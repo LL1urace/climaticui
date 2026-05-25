@@ -85,11 +85,59 @@ def test_sample_client_contains_arctic_stations() -> None:
         params={"station_id": arctic_station["id"], "parameter_id": 1},
     )
 
-    assert len(stations) == 14
+    assert len(stations) >= 7530
     assert arctic_station["name"] == "Ostrov Dikson"
     assert availability["date_min"] == "1995-01-01"
     assert availability["date_max"] == "2024-12-01"
     assert availability["count"] == 360
+
+
+def test_sample_client_loads_eurasia_stations_from_sqlite() -> None:
+    """Проверяет загрузку большого справочника станций из SQLite.
+
+    Returns:
+        None.
+    """
+
+    client = SampleApiClient(token="sample")
+    stations = client.get("/stations")["items"]
+    imported_station = next(station for station in stations if station.get("source_id") == "OMAM0")
+    availability = client.get(
+        "/observations/availability",
+        params={"station_id": imported_station["id"], "parameter_id": 1},
+    )
+
+    assert imported_station["code"] == "OMAM0"
+    assert imported_station["country"] == "AE"
+    assert availability["count"] == 60
+
+
+def test_sample_client_saves_analysis_set_per_station() -> None:
+    """Проверяет sample-сохранение пользовательского набора анализа.
+
+    Returns:
+        None.
+    """
+
+    client = SampleApiClient(token="sample")
+    record = client.post(
+        "/saved-analysis-sets",
+        json={
+            "station_id": 20674,
+            "parameter_id": 1,
+            "selected_parameters": [1, 2],
+            "period_start": "1995-01-01",
+            "period_end": "2024-12-01",
+            "mode": "dashboard",
+        },
+    )
+    saved_sets = client.get("/saved-analysis-sets")["items"]
+
+    assert record["id"]
+    assert record["station_id"] == 20674
+    assert record["parameter_id"] == 1
+    assert record["selected_parameters"] == [1, 2]
+    assert saved_sets[0]["id"] == record["id"]
 
 
 def test_sample_client_returns_correlation_matrix_and_pairs() -> None:

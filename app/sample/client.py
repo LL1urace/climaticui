@@ -10,12 +10,21 @@ import statistics
 from typing import Any
 
 from app.api.client import ApiError
-from app.sample.data import ARCTIC_MONTHLY_ROWS, CLIMATE_ZONES, OBSERVATIONS, PARAMETERS, SAMPLE_USER, STATIONS
+from app.sample.data import (
+    ARCTIC_MONTHLY_ROWS,
+    CLIMATE_ZONES,
+    OBSERVATIONS,
+    PARAMETERS,
+    SAMPLE_USER,
+    STATIONS,
+    generated_observations_for_station,
+)
 
 
 _ANALYSIS_HISTORY: list[dict] = []
 _ANALYSIS_RESULTS: dict[int, dict] = {}
 _REPORTS: dict[int, dict] = {}
+_SAVED_ANALYSIS_SETS: list[dict] = []
 
 
 def _parse_date(value: str | date) -> date:
@@ -110,11 +119,18 @@ def _observations(station_id: int | str, parameter_id: int | str, date_from: str
     pid = int(parameter_id)
     start = _parse_date(date_from)
     end = _parse_date(date_to)
+    station = _station(station_id)
     rows = [
         row
         for row in OBSERVATIONS
         if row["station_id"] == sid and row["parameter_id"] == pid and start <= _parse_date(row["observed_at"]) <= end
     ]
+    if not rows:
+        rows = [
+            row
+            for row in generated_observations_for_station(station, parameter_id=pid, start_id=10_000_000)
+            if start <= _parse_date(row["observed_at"]) <= end
+        ]
     if not rows:
         raise ApiError(
             "В sample dataset нет наблюдений за выбранный период.",
@@ -976,6 +992,8 @@ class SampleApiClient:
             return {"values": _series(params)}
         if path == "/analysis/history":
             return {"items": _ANALYSIS_HISTORY}
+        if path == "/saved-analysis-sets":
+            return {"items": _SAVED_ANALYSIS_SETS}
         if path.startswith("/analysis/"):
             run_id = int(path.rsplit("/", 1)[1])
             if run_id not in _ANALYSIS_RESULTS:
@@ -1015,6 +1033,21 @@ class SampleApiClient:
             return _compare_stations(payload)
         if path == "/forecasts/run":
             return _forecast(payload)
+        if path == "/saved-analysis-sets":
+            saved_set_id = len(_SAVED_ANALYSIS_SETS) + 1
+            record = {
+                "id": saved_set_id,
+                "user_id": SAMPLE_USER["id"],
+                "station_id": payload.get("station_id"),
+                "parameter_id": payload.get("parameter_id"),
+                "selected_parameters": payload.get("selected_parameters") or [],
+                "period_start": payload.get("period_start"),
+                "period_end": payload.get("period_end"),
+                "mode": payload.get("mode", "dashboard"),
+                "created_at": datetime.now().isoformat(),
+            }
+            _SAVED_ANALYSIS_SETS.insert(0, record)
+            return record
         if path == "/reports":
             report_id = len(_REPORTS) + 1
             analysis_run_id = int(payload["analysis_run_id"])

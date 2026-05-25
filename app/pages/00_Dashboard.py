@@ -10,14 +10,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.api import saved_sets
 from app.api.client import ApiError
 from app.components.errors import render_api_error
-from app.components.filters import date_period, load_stations, multiselect_stations, select_aggregation
+from app.components.filters import date_period, load_parameters, load_stations, multiselect_stations, select_aggregation
 from app.components.layout import page_title, setup_page
 from app.components.maps import render_stations_map
 from app.components.sidebar import render_sidebar
 from app.state.session import init_session_state, remember_selection, require_auth
-from app.utils.formatters import station_id, station_label
+from app.utils.formatters import parameter_id, station_id, station_label
 
 
 FEATURES = [
@@ -76,6 +77,8 @@ FEATURES = [
     },
 ]
 
+EURASIA_MAP_VIEW = {"latitude": 52.0, "longitude": 75.0, "zoom": 1.6, "pitch": 0, "bearing": 0}
+
 TOP_NAVIGATION = [
     {"label": "Анализ", "path": "pages/01_Analysis.py", "key": "analysis"},
     {"label": "Периоды", "path": "pages/02_Period_Comparison.py", "key": "periods"},
@@ -86,6 +89,13 @@ TOP_NAVIGATION = [
     {"label": "История", "path": "pages/06_Analysis_History.py", "key": "history"},
     {"label": "Отчёты", "path": "pages/07_Reports.py", "key": "reports"},
 ]
+
+SAVE_SET_MODES = {
+    "dashboard": "Дашборд",
+    "analysis": "Анализ",
+    "forecast": "Прогнозирование",
+    "report": "Отчёт",
+}
 
 
 def _apply_pending_map_selection() -> None:
@@ -273,6 +283,112 @@ def _remember_dashboard_filters(selected_station_ids: list[Any], date_from: Any,
         st.session_state["selected_station_id"] = None
 
 
+def _saved_set_payloads(
+    selected_station_ids: list[Any],
+    parameters: list[dict],
+    date_from: Any,
+    date_to: Any,
+    mode: str,
+) -> list[dict[str, Any]]:
+    """Формирует payload сохранённых наборов анализа.
+
+    Args:
+        selected_station_ids: Выбранные метеостанции.
+        parameters: Все климатические показатели из справочника.
+        date_from: Начальная дата периода.
+        date_to: Конечная дата периода.
+        mode: Режим работы набора.
+
+    Returns:
+        Список payload по одной записи на каждую станцию.
+    """
+
+    selected_parameter_ids = [parameter_id(parameter) for parameter in parameters if parameter_id(parameter) is not None]
+    parameter = selected_parameter_ids[0] if selected_parameter_ids else None
+    return [
+        {
+            "station_id": current_station_id,
+            "parameter_id": parameter,
+            "selected_parameters": selected_parameter_ids,
+            "period_start": date_from.isoformat(),
+            "period_end": date_to.isoformat(),
+            "mode": mode,
+        }
+        for current_station_id in selected_station_ids
+    ]
+
+
+def _render_saved_set_block(
+    selected_station_ids: list[Any],
+    parameters: list[dict],
+    date_from: Any,
+    date_to: Any,
+) -> None:
+    """Отображает форму сохранения текущего аналитического набора.
+
+    Args:
+        selected_station_ids: Выбранные метеостанции.
+        parameters: Список климатических параметров.
+        date_from: Начальная дата периода.
+        date_to: Конечная дата периода.
+
+    Returns:
+        None.
+    """
+
+    st.subheader("Сохранение набора анализа")
+    st.caption(
+        "Будет создана отдельная запись для каждой выбранной станции. "
+        "Все климатические показатели сохраняются автоматически в selected_parameters, "
+        "а в parameter_id записывается первый показатель из справочника для совместимости с backend-моделью."
+    )
+    with st.container(border=True):
+        mode = st.selectbox(
+            "Режим набора",
+            options=list(SAVE_SET_MODES),
+            format_func=lambda item: SAVE_SET_MODES[item],
+            key="dashboard_saved_set_mode",
+        )
+        parameter_count = len([parameter for parameter in parameters if parameter_id(parameter) is not None])
+        st.caption(f"В набор будет включено климатических показателей: {parameter_count}.")
+
+        can_save = bool(selected_station_ids and parameter_count and date_from and date_to)
+        if not can_save:
+            st.info("Чтобы сохранить набор, выберите станции и период. Список климатических показателей берётся автоматически.")
+
+        if st.button("Сохранить набор анализа", type="primary", use_container_width=True, disabled=not can_save):
+            payloads = _saved_set_payloads(selected_station_ids, parameters, date_from, date_to, mode)
+            saved_records = []
+            errors = []
+            for payload in payloads:
+                try:
+                    saved_records.append(saved_sets.create_saved_analysis_set(payload))
+                except ApiError as error:
+                    errors.append(f"Станция {payload['station_id']}: {error}")
+            if saved_records:
+                st.session_state["last_saved_analysis_sets"] = saved_records
+                st.success(f"Сохранено наборов: {len(saved_records)}.")
+            for error in errors:
+                st.error(error)
+
+        saved_records = st.session_state.get("last_saved_analysis_sets") or []
+        if saved_records:
+            with st.expander("Последние сохранённые наборы", expanded=False):
+                rows = [
+                    {
+                        "ID": record.get("id"),
+                        "Станция": record.get("station_id"),
+                        "Параметр": record.get("parameter_id"),
+                        "Показатели": ", ".join(str(item) for item in record.get("selected_parameters") or []),
+                        "Период": f"{record.get('period_start')} - {record.get('period_end')}",
+                        "Режим": record.get("mode"),
+                        "Создан": record.get("created_at"),
+                    }
+                    for record in saved_records
+                ]
+                st.dataframe(rows, hide_index=True, use_container_width=True)
+
+
 def _safe_float(value: Any) -> float | None:
     """Преобразует значение станции в float, если это возможно.
 
@@ -458,6 +574,7 @@ _apply_pending_map_selection()
 
 try:
     stations = load_stations()
+    parameters = load_parameters()
 except ApiError as error:
     render_api_error(error)
     st.stop()
@@ -510,6 +627,7 @@ map_selected_station_ids = render_stations_map(
     selection_key=_map_selection_key(selected_station_ids, show_only_selected_on_map),
     selection_mode="multi-object",
     show_only_selected=show_only_selected_on_map,
+    initial_view_state=EURASIA_MAP_VIEW,
 )
 if st.session_state.pop("dashboard_ignore_next_map_selection", False):
     map_selected_station_ids = None
@@ -528,3 +646,5 @@ for row in feature_rows:
     for column, feature in zip(cols, row):
         with column:
             _render_feature_card(feature)
+
+_render_saved_set_block(selected_station_ids, parameters, date_from, date_to)

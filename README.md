@@ -36,6 +36,7 @@ USE_SAMPLE_DATA=false
 ```
 
 `USE_SAMPLE_DATA=true` включает локальный демо-набор данных, совместимый с основными backend-моделями. Это удобно, пока backend ещё не запущен.
+Справочник метеостанций sample-режима хранится в SQLite-файле `app/sample/data/klimatika_sample.sqlite`.
 
 ## Локальный запуск
 
