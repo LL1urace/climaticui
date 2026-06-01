@@ -14,7 +14,15 @@ from app.api import comparisons
 from app.api.client import ApiError
 from app.components.charts import render_grouped_bar_chart
 from app.components.errors import render_api_error
-from app.components.filters import date_period, load_parameters, load_stations, multiselect_stations, select_aggregation, select_parameter
+from app.components.filters import (
+    date_period,
+    load_parameters,
+    load_stations,
+    multiselect_stations,
+    render_period_availability_notice,
+    select_aggregation,
+    select_parameter,
+)
 from app.components.layout import page_title, render_home_button, setup_page
 from app.components.sidebar import render_sidebar
 from app.components.tables import render_json_preview, render_table
@@ -350,19 +358,30 @@ page_title("Сравнение периодов", "Сравнивайте нес
 render_home_button()
 
 try:
-    with st.sidebar:
-        st.header("Параметры")
-        stations = load_stations()
-        parameters = load_parameters()
+    stations = load_stations()
+    parameters = load_parameters()
+    with st.container(border=True, key="period_comparison_parameters"):
+        st.subheader("Параметры сравнения")
         selected_station_ids = multiselect_stations(stations, "period_comparison_stations")
         parameter = select_parameter(parameters, key="period_comparison_parameter")
         aggregation = select_aggregation("period_comparison_aggregation")
+
+        st.markdown("**Периоды**")
+        periods = _render_periods()
+        for period in periods:
+            render_period_availability_notice(
+                selected_station_ids,
+                [parameter],
+                period["date_from"],
+                period["date_to"],
+                label=period["name"],
+            )
+        run_clicked = st.button("Сравнить периоды", type="primary", use_container_width=True)
+
+    with st.sidebar:
+        st.subheader("Настройки отображения")
         metric = st.selectbox("Метрика графика", ["mean", "min", "max", "std", "sum"], key="period_comparison_metric")
         station_colors = _render_station_palette(stations, selected_station_ids)
-
-        st.subheader("Периоды")
-        periods = _render_periods()
-        run_clicked = st.button("Сравнить периоды", type="primary", use_container_width=True)
 except ApiError as error:
     render_api_error(error)
     st.stop()

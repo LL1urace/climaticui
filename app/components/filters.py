@@ -29,6 +29,10 @@ ANALYSIS_METHOD_LABELS = {
     "extremes": "Экстремумы",
 }
 
+CALENDAR_MIN_DATE = date.min
+CALENDAR_MAX_DATE = date.max
+CALENDAR_HELP = "Можно выбрать любую дату. Если за период нет наблюдений, приложение покажет предупреждение."
+
 
 def load_climate_zones() -> list[dict]:
     """Загружает и кэширует климатические зоны.
@@ -112,7 +116,14 @@ def multiselect_stations(stations: list[dict], key: str = "station_multiselect",
     by_id = {station_id(station): station for station in stations}
     stored_default = default_ids if default_ids is not None else st.session_state.get("dashboard_station_ids") or []
     default = [item_id for item_id in stored_default if item_id in options]
-    return st.multiselect("Метеостанции", options=options, default=default, format_func=lambda item_id: station_label(by_id[item_id]), key=key)
+    widget_options = {
+        "options": options,
+        "format_func": lambda item_id: station_label(by_id[item_id]),
+        "key": key,
+    }
+    if key not in st.session_state:
+        widget_options["default"] = default
+    return st.multiselect("Метеостанции", **widget_options)
 
 
 def select_parameter(parameters: list[dict], key: str = "parameter_select", label: str = "Параметр") -> Any:
@@ -176,8 +187,22 @@ def date_period(
     stored_end = None if allow_empty else st.session_state.get("dashboard_date_to")
     fallback_start = None if allow_empty else date(today.year - 5, 1, 1)
     fallback_end = None if allow_empty else today
-    start = st.date_input("Начало периода", value=default_start or stored_start or fallback_start, key=f"{prefix}_date_from")
-    end = st.date_input("Конец периода", value=default_end or stored_end or fallback_end, key=f"{prefix}_date_to")
+    start = st.date_input(
+        "Начало периода",
+        value=default_start or stored_start or fallback_start,
+        min_value=CALENDAR_MIN_DATE,
+        max_value=CALENDAR_MAX_DATE,
+        help=CALENDAR_HELP,
+        key=f"{prefix}_date_from",
+    )
+    end = st.date_input(
+        "Конец периода",
+        value=default_end or stored_end or fallback_end,
+        min_value=CALENDAR_MIN_DATE,
+        max_value=CALENDAR_MAX_DATE,
+        help=CALENDAR_HELP,
+        key=f"{prefix}_date_to",
+    )
     return start, end
 
 
@@ -200,6 +225,7 @@ def common_filters(prefix: str = "filters") -> dict[str, Any]:
     parameter = select_parameter(parameters, key=f"{prefix}_parameter")
     aggregation = select_aggregation(key=f"{prefix}_aggregation")
     date_from, date_to = date_period(prefix=prefix)
+    render_period_availability_notice([station], [parameter], date_from, date_to)
     return {
         "station_id": station,
         "parameter_id": parameter,
@@ -227,11 +253,13 @@ def analysis_methods() -> list[str]:
     )
 
 
-def analysis_options(prefix: str = "analysis") -> dict[str, Any]:
+def analysis_options(prefix: str = "analysis", station: Any = None, parameter: Any = None) -> dict[str, Any]:
     """Отображает дополнительные параметры методов анализа.
 
     Args:
         prefix: Префикс ключей Streamlit-виджетов.
+        station: Идентификатор выбранной станции.
+        parameter: Идентификатор выбранного климатического параметра.
 
     Returns:
         Словарь options для `POST /analysis/run`.
@@ -240,6 +268,13 @@ def analysis_options(prefix: str = "analysis") -> dict[str, Any]:
     window = st.number_input("Окно скользящего среднего", min_value=2, max_value=120, value=12, step=1, key=f"{prefix}_ma_window")
     extremes_count = st.number_input("Количество экстремумов в таблице", min_value=3, max_value=20, value=5, step=1, key=f"{prefix}_extremes_count")
     norm_start, norm_end = date_period(prefix=f"{prefix}_norm")
+    render_period_availability_notice(
+        [station],
+        [parameter],
+        norm_start,
+        norm_end,
+        label="Период климатической нормы",
+    )
     return {
         "moving_average_window": int(window),
         "window": int(window),
@@ -251,12 +286,358 @@ def analysis_options(prefix: str = "analysis") -> dict[str, Any]:
     }
 
 
-def render_availability(station: Any, parameter: Any) -> None:
+def _parse_availability_date(value: Any) -> date | None:
+    """Преобразует дату доступности из backend API в объект даты.
+
+    Args:
+        value: Значение даты в формате ISO или объект даты.
+
+    Returns:
+        Дата или None, если значение невозможно преобразовать.
+    """
+
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def availability_period_message(
+    date_from: date | None,
+    date_to: date | None,
+    available_from: Any,
+    available_to: Any,
+) -> tuple[str, str] | None:
+    """Формирует уведомление о пересечении периода с доступными наблюдениями.
+
+    Args:
+        date_from: Начало выбранного пользователем периода.
+        date_to: Конец выбранного пользователем периода.
+        available_from: Начало доступного периода из backend API.
+        available_to: Конец доступного периода из backend API.
+
+    Returns:
+        Кортеж из типа уведомления и текста или None, если уведомление не нужно.
+    """
+
+    availability_start = _parse_availability_date(available_from)
+    availability_end = _parse_availability_date(available_to)
+    if not date_from or not date_to or not availability_start or not availability_end:
+        return None
+    available_period = f"{availability_start.isoformat()} - {availability_end.isoformat()}"
+    if date_to < availability_start or date_from > availability_end:
+        return "warning", f"За выбранный период наблюдений нет. Доступные данные: {available_period}."
+    if date_from < availability_start or date_to > availability_end:
+        return "info", f"Часть выбранного периода не содержит наблюдений. Доступные данные: {available_period}."
+    return None
+
+
+def availability_ranges_message(
+    date_from: date | None,
+    date_to: date | None,
+    ranges: list[tuple[Any, Any]],
+) -> tuple[str, str] | None:
+    """Формирует уведомление по нескольким диапазонам доступности.
+
+    Args:
+        date_from: Начало выбранного пользователем периода.
+        date_to: Конец выбранного пользователем периода.
+        ranges: Диапазоны доступности станций и параметров.
+
+    Returns:
+        Кортеж из типа уведомления и текста или None, если уведомление не нужно.
+    """
+
+    if not date_from or not date_to:
+        return None
+    parsed_ranges = [
+        (range_start, range_end)
+        for available_from, available_to in ranges
+        if (range_start := _parse_availability_date(available_from))
+        and (range_end := _parse_availability_date(available_to))
+    ]
+    if not parsed_ranges:
+        return None
+    earliest = min(range_start for range_start, _ in parsed_ranges)
+    latest = max(range_end for _, range_end in parsed_ranges)
+    available_period = f"{earliest.isoformat()} - {latest.isoformat()}"
+    overlapping_ranges = [
+        (range_start, range_end)
+        for range_start, range_end in parsed_ranges
+        if date_from <= range_end and date_to >= range_start
+    ]
+    if not overlapping_ranges:
+        return "warning", f"За выбранный период наблюдений нет. Доступные данные: {available_period}."
+    if len(overlapping_ranges) < len(parsed_ranges) or date_from < earliest or date_to > latest:
+        return "info", f"Часть выбранного периода не содержит наблюдений. Доступные данные: {available_period}."
+    return None
+
+
+def _availability_issue(
+    date_from: date | None,
+    date_to: date | None,
+    available_from: Any,
+    available_to: Any,
+) -> tuple[str, str] | None:
+    """Определяет проблему покрытия выбранного периода наблюдениями.
+
+    Args:
+        date_from: Начало выбранного периода.
+        date_to: Конец выбранного периода.
+        available_from: Начало доступного диапазона.
+        available_to: Конец доступного диапазона.
+
+    Returns:
+        Тип проблемы и доступный диапазон или None, если период покрыт полностью.
+    """
+
+    availability_start = _parse_availability_date(available_from)
+    availability_end = _parse_availability_date(available_to)
+    if not date_from or not date_to or not availability_start or not availability_end:
+        return None
+    available_period = f"{availability_start.isoformat()} - {availability_end.isoformat()}"
+    if date_to < availability_start or date_from > availability_end:
+        return "missing", available_period
+    if date_from < availability_start or date_to > availability_end:
+        return "partial", available_period
+    return None
+
+
+def availability_details_message(
+    date_from: date | None,
+    date_to: date | None,
+    entries: list[dict[str, Any]],
+) -> tuple[str, str] | None:
+    """Формирует подробное уведомление о проблемных станциях и параметрах.
+
+    Args:
+        date_from: Начало выбранного периода.
+        date_to: Конец выбранного периода.
+        entries: Источники данных с подписями и диапазонами доступности.
+
+    Returns:
+        Тип и текст уведомления или None, если все диапазоны покрывают период.
+    """
+
+    if not date_from or not date_to:
+        return None
+    grouped_issues: dict[tuple[str, str, str], set[str]] = {}
+    for entry in entries:
+        issue = _availability_issue(date_from, date_to, entry.get("date_from"), entry.get("date_to"))
+        if not issue:
+            continue
+        issue_type, available_period = issue
+        key = (str(entry.get("station") or "Метеостанция"), issue_type, available_period)
+        parameter = entry.get("parameter")
+        if parameter:
+            grouped_issues.setdefault(key, set()).add(str(parameter))
+        else:
+            grouped_issues.setdefault(key, set())
+
+    if not grouped_issues:
+        return None
+
+    has_missing = any(issue_type == "missing" for _, issue_type, _ in grouped_issues)
+    message_type = "warning" if has_missing else "info"
+    selected_period = f"{date_from.isoformat()} - {date_to.isoformat()}"
+    lines = []
+    for (station, issue_type, available_period), parameters in sorted(grouped_issues.items()):
+        issue_text = "наблюдений нет" if issue_type == "missing" else "период покрыт частично"
+        parameters_text = f" · параметры: {', '.join(sorted(parameters))}" if parameters else ""
+        lines.append(f"- **{station}**{parameters_text}: {issue_text}; доступно: `{available_period}`.")
+    summary = "Есть проблемы с доступностью наблюдений:"
+    return message_type, f"Выбранный период: `{selected_period}`.\n\n{summary}\n" + "\n".join(lines)
+
+
+def _station_notice_label(station: Any) -> str:
+    """Возвращает подпись станции для уведомления о доступности.
+
+    Args:
+        station: Идентификатор или запись метеостанции.
+
+    Returns:
+        Человекочитаемая подпись станции.
+    """
+
+    if isinstance(station, dict):
+        return station_label(station)
+    stations = st.session_state.get("cached_stations") or []
+    for record in stations:
+        if str(station_id(record)) == str(station):
+            return station_label(record)
+    return f"Станция {station}"
+
+
+def _parameter_notice_label(parameter: Any) -> str:
+    """Возвращает подпись параметра для уведомления о доступности.
+
+    Args:
+        parameter: Идентификатор или запись климатического параметра.
+
+    Returns:
+        Человекочитаемая подпись параметра.
+    """
+
+    if isinstance(parameter, dict):
+        return parameter_label(parameter)
+    parameters = st.session_state.get("cached_parameters") or []
+    for record in parameters:
+        if str(parameter_id(record)) == str(parameter):
+            return parameter_label(record)
+    return f"Параметр {parameter}"
+
+
+def _cached_availability(station: Any, parameter: Any) -> dict | None:
+    """Получает доступность наблюдений через API и сохраняет её в session state.
+
+    Args:
+        station: Идентификатор станции.
+        parameter: Идентификатор климатического параметра.
+
+    Returns:
+        Словарь доступности или None, если API не вернул данные.
+    """
+
+    if station is None or parameter is None:
+        return None
+    cache = st.session_state.setdefault("cached_observation_availability", {})
+    cache_key = f"{station}:{parameter}"
+    if cache_key not in cache:
+        try:
+            availability = observations.get_availability(station, parameter)
+        except Exception:
+            availability = None
+        cache[cache_key] = availability if isinstance(availability, dict) else None
+    return cache[cache_key]
+
+
+def _render_period_message(message: tuple[str, str] | None, label: str | None = None) -> None:
+    """Отображает сообщение о доступности выбранного периода.
+
+    Args:
+        message: Тип и текст уведомления или None.
+        label: Необязательная подпись проверяемого периода.
+
+    Returns:
+        None.
+    """
+
+    if not message:
+        return
+    message_type, text = message
+    text = f"**{label}**\n\n{text}" if label else text
+    if message_type == "warning":
+        st.warning(text)
+    else:
+        st.info(text)
+
+
+def render_period_availability_notice(
+    station_ids: list[Any],
+    parameter_ids: list[Any],
+    date_from: date | None,
+    date_to: date | None,
+    label: str | None = None,
+) -> None:
+    """Проверяет через API и отображает доступность выбранного периода.
+
+    Args:
+        station_ids: Идентификаторы выбранных станций.
+        parameter_ids: Идентификаторы выбранных климатических параметров.
+        date_from: Начало выбранного периода.
+        date_to: Конец выбранного периода.
+        label: Необязательная подпись периода для уведомления.
+
+    Returns:
+        None.
+    """
+
+    entries = []
+    for station in station_ids:
+        for parameter in parameter_ids:
+            availability = _cached_availability(station, parameter)
+            if not availability:
+                continue
+            entries.append(
+                {
+                    "station": _station_notice_label(station),
+                    "parameter": _parameter_notice_label(parameter),
+                    "date_from": availability.get("date_min") or availability.get("date_from"),
+                    "date_to": availability.get("date_max") or availability.get("date_to"),
+                }
+            )
+    _render_period_message(availability_details_message(date_from, date_to, entries), label)
+
+
+def render_station_period_availability_notice(
+    stations: list[dict],
+    date_from: date | None,
+    date_to: date | None,
+    parameter_ids: list[Any] | None = None,
+) -> None:
+    """Отображает доступность периода панели по API или метаданным станций.
+
+    Args:
+        stations: Выбранные станции с метаданными доступности.
+        date_from: Начало выбранного периода.
+        date_to: Конец выбранного периода.
+        parameter_ids: Климатические параметры для проверки через API.
+
+    Returns:
+        None.
+    """
+
+    entries = []
+    for station in stations:
+        station_entries = []
+        for parameter in parameter_ids or []:
+            availability = _cached_availability(station_id(station), parameter)
+            if not availability:
+                continue
+            station_entries.append(
+                {
+                    "station": _station_notice_label(station),
+                    "parameter": _parameter_notice_label(parameter),
+                    "date_from": availability.get("date_min") or availability.get("date_from"),
+                    "date_to": availability.get("date_max") or availability.get("date_to"),
+                }
+            )
+        if not station_entries:
+            station_entries = [
+                {
+                    "station": _station_notice_label(station),
+                    "parameter": "Температура",
+                    "date_from": station.get("temp_start"),
+                    "date_to": station.get("temp_end"),
+                },
+                {
+                    "station": _station_notice_label(station),
+                    "parameter": "Осадки",
+                    "date_from": station.get("prcp_start"),
+                    "date_to": station.get("prcp_end"),
+                },
+            ]
+        entries.extend(station_entries)
+    _render_period_message(availability_details_message(date_from, date_to, entries))
+
+
+def render_availability(
+    station: Any,
+    parameter: Any,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> None:
     """Отображает доступный период наблюдений для выбранной пары.
 
     Args:
         station: Идентификатор станции.
         parameter: Идентификатор параметра.
+        date_from: Начало выбранного пользователем периода.
+        date_to: Конец выбранного пользователем периода.
 
     Returns:
         None.
@@ -264,17 +645,15 @@ def render_availability(station: Any, parameter: Any) -> None:
 
     if not station or not parameter:
         return
-    try:
-        availability = observations.get_availability(station, parameter)
-    except Exception:
-        return
-    if not isinstance(availability, dict):
+    availability = _cached_availability(station, parameter)
+    if not availability:
         return
     date_min = availability.get("date_min") or availability.get("date_from")
     date_max = availability.get("date_max") or availability.get("date_to")
     count = availability.get("count")
     if date_min or date_max or count:
         st.caption(f"Доступность: {date_min or '?'} - {date_max or '?'}; наблюдений: {count or '?'}")
+    _render_period_message(availability_period_message(date_from, date_to, date_min, date_max))
 
 
 def validate_common_filters(filters: dict[str, Any]) -> ValidationResult:

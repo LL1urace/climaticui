@@ -19,7 +19,14 @@ from app.components.charts import (
     render_multi_climatograms,
 )
 from app.components.errors import render_api_error
-from app.components.filters import date_period, load_parameters, load_stations, multiselect_stations, select_parameter
+from app.components.filters import (
+    date_period,
+    load_parameters,
+    load_stations,
+    multiselect_stations,
+    render_period_availability_notice,
+    select_parameter,
+)
 from app.components.layout import page_title, render_home_button, setup_page
 from app.components.sidebar import render_sidebar
 from app.components.tables import render_json_preview, render_table
@@ -398,18 +405,35 @@ page_title("Климатограмма", "Температура и осадки
 render_home_button()
 
 try:
-    with st.sidebar:
-        stations = load_stations()
-        parameters = load_parameters()
+    stations = load_stations()
+    parameters = load_parameters()
+    with st.container(border=True, key="climatogram_parameters"):
+        st.subheader("Параметры расчёта")
         selected_station_ids = multiselect_stations(stations, "climatogram_stations")
 
-        st.subheader("Периоды")
+        st.markdown("**Периоды**")
         periods = _render_periods()
 
-        st.subheader("Параметры")
+        st.markdown("**Климатические параметры**")
         temperature_parameter = select_parameter(parameters, "climatogram_temp", "Параметр температуры")
         precipitation_parameter = select_parameter(parameters, "climatogram_precip", "Параметр осадков")
+        for period in periods:
+            render_period_availability_notice(
+                selected_station_ids,
+                [temperature_parameter, precipitation_parameter],
+                period["date_from"],
+                period["date_to"],
+                label=period["name"],
+            )
 
+        combinations_count = len(selected_station_ids) * len(periods)
+        if combinations_count > 24:
+            st.warning(f"Будет построено {combinations_count} климатограмм. Запрос может занять больше времени.")
+
+        run_clicked = st.button("Построить климатограммы", type="primary", use_container_width=True)
+
+    with st.sidebar:
+        st.subheader("Настройки отображения")
         st.subheader("Режимы наложения")
         overlay_stations = st.checkbox("Накладывать метеостанции", value=True, key="climatogram_overlay_stations")
         overlay_periods = st.checkbox("Накладывать периоды", value=False, key="climatogram_overlay_periods")
@@ -457,12 +481,6 @@ try:
                 key="climatogram_scatter_close_polygon",
             )
             show_labels = st.checkbox("Подписывать точки месяцами", value=True, key="climatogram_scatter_show_labels")
-
-        combinations_count = len(selected_station_ids) * len(periods)
-        if combinations_count > 24:
-            st.warning(f"Будет построено {combinations_count} климатограмм. Запрос может занять больше времени.")
-
-        run_clicked = st.button("Построить климатограммы", type="primary", use_container_width=True)
 except ApiError as error:
     render_api_error(error)
     st.stop()

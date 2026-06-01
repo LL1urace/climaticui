@@ -39,17 +39,18 @@ if not runs:
     st.stop()
 
 statuses = sorted({str(run.get("status")) for run in runs if run.get("status")})
-selected_status = st.selectbox("Статус", ["Все"] + statuses)
-visible_runs = [run for run in runs if selected_status == "Все" or str(run.get("status")) == selected_status]
+with st.container(border=True, key="history_parameters"):
+    st.subheader("Параметры истории")
+    selected_status = st.selectbox("Статус", ["Все"] + statuses)
+    visible_runs = [run for run in runs if selected_status == "Все" or str(run.get("status")) == selected_status]
+    run_ids = [run.get("analysis_run_id") or run.get("id") for run in visible_runs]
+    run_ids = [run_id for run_id in run_ids if run_id is not None]
+    selected_run_id = st.selectbox("Открыть анализ", run_ids) if run_ids else None
+    open_clicked = st.button("Открыть результат", type="primary", use_container_width=True, disabled=not run_ids)
+
 render_table(visible_runs)
 
-run_ids = [run.get("analysis_run_id") or run.get("id") for run in visible_runs]
-run_ids = [run_id for run_id in run_ids if run_id is not None]
-if not run_ids:
-    st.stop()
-
-selected_run_id = st.selectbox("Открыть анализ", run_ids)
-if st.button("Открыть результат", type="primary"):
+if open_clicked and selected_run_id is not None:
     try:
         with st.spinner("Загружаю результат анализа..."):
             result = analysis.get_analysis_result(selected_run_id)

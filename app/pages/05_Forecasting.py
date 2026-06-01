@@ -29,7 +29,8 @@ render_home_button()
 st.warning("Прогноз является исследовательским и демонстрационным; точность не гарантируется.")
 
 try:
-    with st.sidebar:
+    with st.container(border=True, key="forecast_parameters"):
+        st.subheader("Параметры расчёта")
         filters = common_filters("forecast")
         model = st.selectbox("Модель", ["linear_trend", "moving_average", "seasonal_naive"])
         horizon = st.number_input("Горизонт", min_value=1, max_value=120, value=12, step=1)

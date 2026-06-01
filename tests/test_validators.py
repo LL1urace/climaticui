@@ -16,6 +16,17 @@ def test_validate_period_rejects_reversed_dates() -> None:
     assert result.ok is False
 
 
+def test_validate_period_accepts_distant_past_and_future_dates() -> None:
+    """Проверяет отсутствие искусственных ограничений диапазона календаря.
+
+    Returns:
+        None.
+    """
+
+    result = validate_period(date(1200, 1, 1), date(8400, 12, 31))
+    assert result.ok is True
+
+
 def test_validate_required_filters_requires_station_and_parameter() -> None:
     """Проверяет обязательность станции и параметра в фильтрах.
 

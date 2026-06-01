@@ -92,20 +92,23 @@ available_sections = [section for section in sections if section.available]
 if not available_sections:
     st.warning("Пока нет данных для отчёта. Запустите анализ, климатограмму, сравнение, прогноз или корреляцию.")
 
-layout_cols = st.columns([0.58, 0.42])
-with layout_cols[0]:
-    selected_sections = _selected_sections(sections)
-with layout_cols[1]:
-    include_cover, include_graphs, include_tables = _render_report_settings()
-    st.markdown("### Что попадёт в файл")
-    if selected_sections:
-        for section in selected_sections:
-            st.success(section.title)
-    else:
-        st.caption("Выберите хотя бы один доступный раздел.")
+with st.container(border=True, key="report_parameters"):
+    layout_cols = st.columns([0.58, 0.42])
+    with layout_cols[0]:
+        selected_sections = _selected_sections(sections)
+    with layout_cols[1]:
+        include_cover, include_graphs, include_tables = _render_report_settings()
+        st.markdown("### Что попадёт в файл")
+        if selected_sections:
+            for section in selected_sections:
+                st.success(section.title)
+        else:
+            st.caption("Выберите хотя бы один доступный раздел.")
 
-can_build = bool(selected_sections)
-if st.button("Сформировать PDF", type="primary", use_container_width=True, disabled=not can_build):
+    can_build = bool(selected_sections)
+    build_clicked = st.button("Сформировать PDF", type="primary", use_container_width=True, disabled=not can_build)
+
+if build_clicked:
     try:
         with st.spinner("Собираю PDF с графиками и таблицами..."):
             pdf_bytes = build_pdf_report(

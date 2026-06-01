@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -10,15 +12,22 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.api import saved_sets
+from app.api import comparisons, saved_sets
 from app.api.client import ApiError
 from app.components.errors import render_api_error
-from app.components.filters import date_period, load_parameters, load_stations, multiselect_stations, select_aggregation
+from app.components.filters import (
+    date_period,
+    load_parameters,
+    load_stations,
+    multiselect_stations,
+    render_station_period_availability_notice,
+    select_aggregation,
+)
 from app.components.layout import page_title, setup_page
-from app.components.maps import render_stations_map
+from app.components.maps import BASEMAP_LABELS, EURASIA_MAP_VIEW, render_stations_map, station_map_palette
 from app.components.sidebar import render_sidebar
-from app.state.session import init_session_state, remember_selection, require_auth
-from app.utils.formatters import parameter_id, station_id, station_label
+from app.state.session import clear_dashboard_context, init_session_state, remember_selection, require_auth
+from app.utils.formatters import parameter_id, parameter_label, station_id, station_label, unwrap_records
 
 
 FEATURES = [
@@ -27,6 +36,8 @@ FEATURES = [
         "text": "Базовая статистика, тренд, скользящее среднее, аномалии и климатическая норма.",
         "path": "pages/01_Analysis.py",
         "icon": "📈",
+        "button_label": "Открыть",
+        "button_key": "open-analysis",
         "tone": "klima-card-blue",
     },
     {
@@ -34,6 +45,8 @@ FEATURES = [
         "text": "Оцените, как изменилась выбранная метрика между двумя временными интервалами.",
         "path": "pages/02_Period_Comparison.py",
         "icon": "🧭",
+        "button_label": "Открыть",
+        "button_key": "open-period-comparison",
         "tone": "klima-card-ink",
     },
     {
@@ -41,6 +54,8 @@ FEATURES = [
         "text": "Сопоставьте несколько метеостанций и посмотрите результат на карте.",
         "path": "pages/03_Station_Comparison.py",
         "icon": "📍",
+        "button_label": "Открыть",
+        "button_key": "open-station-comparison",
         "tone": "klima-card-blue",
     },
     {
@@ -48,6 +63,8 @@ FEATURES = [
         "text": "Оцените связь между несколькими климатическими параметрами одной станции.",
         "path": "pages/08_Correlation.py",
         "icon": "🔗",
+        "button_label": "Открыть",
+        "button_key": "open-correlation",
         "tone": "klima-card-ink",
     },
     {
@@ -55,6 +72,8 @@ FEATURES = [
         "text": "Постройте месячный профиль температуры и осадков для выбранной станции.",
         "path": "pages/04_Climatogram.py",
         "icon": "🌦️",
+        "button_label": "Открыть",
+        "button_key": "open-climatogram",
         "tone": "klima-card-blue",
     },
     {
@@ -62,22 +81,29 @@ FEATURES = [
         "text": "Запустите исследовательский backend-прогноз с явным demo-warning.",
         "path": "pages/05_Forecasting.py",
         "icon": "🔮",
+        "button_label": "Открыть",
+        "button_key": "open-forecasting",
+        "tone": "klima-card-ink",
+    },
+    {
+        "title": "История анализа",
+        "text": "Откройте прошлые запуски анализа и вернитесь к сохранённым результатам.",
+        "path": "pages/06_Analysis_History.py",
+        "icon": "🗂️",
+        "button_label": "Открыть историю",
+        "button_key": "open-analysis-history",
         "tone": "klima-card-blue",
     },
     {
-        "title": "История и отчёты",
-        "text": "Откройте прошлые запуски анализа и сформируйте скачиваемый отчёт.",
-        "path": "pages/06_Analysis_History.py",
-        "icon": "🗂️",
-        "button_label": "История",
-        "secondary_path": "pages/07_Reports.py",
-        "secondary_icon": "📄",
-        "secondary_label": "Отчёты",
+        "title": "Отчёты",
+        "text": "Сформируйте скачиваемый отчёт по выбранным станциям, периоду и параметрам.",
+        "path": "pages/07_Reports.py",
+        "icon": "📄",
+        "button_label": "Открыть отчёты",
+        "button_key": "open-reports",
         "tone": "klima-card-ink",
     },
 ]
-
-EURASIA_MAP_VIEW = {"latitude": 52.0, "longitude": 75.0, "zoom": 1.6, "pitch": 0, "bearing": 0}
 
 TOP_NAVIGATION = [
     {"label": "Анализ", "path": "pages/01_Analysis.py", "key": "analysis"},
@@ -96,6 +122,7 @@ SAVE_SET_MODES = {
     "forecast": "Прогнозирование",
     "report": "Отчёт",
 }
+MAP_CLASSIFICATION_VALUE_KEY = "_classification_mean"
 
 
 def _apply_pending_map_selection() -> None:
@@ -111,6 +138,48 @@ def _apply_pending_map_selection() -> None:
     st.session_state["dashboard_station_ids"] = pending_ids
     st.session_state["dashboard_station_multiselect"] = pending_ids
     st.session_state["dashboard_ignore_next_map_selection"] = True
+
+
+def _apply_pending_dashboard_reset() -> None:
+    """Применяет подтверждённый сброс до создания виджетов фильтров.
+
+    Returns:
+        None.
+    """
+
+    if not st.session_state.pop("dashboard_reset_pending", False):
+        return
+    clear_dashboard_context()
+    st.session_state["dashboard_station_multiselect"] = []
+    st.session_state["dashboard_aggregation_select"] = "monthly"
+    st.session_state["dashboard_period_date_from"] = None
+    st.session_state["dashboard_period_date_to"] = None
+    st.session_state["dashboard_reset_notice"] = True
+
+
+@st.dialog("Сбросить данные панели?")
+def _render_reset_dashboard_dialog() -> None:
+    """Запрашивает подтверждение перед очисткой текущего аналитического среза.
+
+    Returns:
+        None.
+    """
+
+    st.warning(
+        "Текущий выбор метеостанций, периода и агрегации будет сброшен. "
+        "Если этот набор данных важен, сначала сохраните его в блоке «Сохранение набора анализа»."
+    )
+    st.caption(
+        "Авторизация, справочники, сохранённые на backend наборы и визуальные настройки карты останутся без изменений."
+    )
+    cancel_column, confirm_column = st.columns(2)
+    with cancel_column:
+        if st.button("Отмена", key="cancel-dashboard-reset", use_container_width=True):
+            st.rerun(scope="app")
+    with confirm_column:
+        if st.button("Да, сбросить", key="confirm-dashboard-reset", type="primary", use_container_width=True):
+            st.session_state["dashboard_reset_pending"] = True
+            st.rerun(scope="app")
 
 
 def _render_top_navigation() -> None:
@@ -150,6 +219,32 @@ def _render_top_navigation() -> None:
         {nav_hover_selectors} {{
             transform: translateY(-1px);
             box-shadow: 0 18px 44px rgba(7, 17, 31, .24) !important;
+        }}
+
+        .st-key-top_nav_home button {{
+            min-height: 3.05rem !important;
+            padding: .55rem .65rem !important;
+            border: 1px solid rgba(255, 255, 255, .58) !important;
+            background: linear-gradient(135deg, #9ff4df 0%, #76e4c5 52%, #17b6d6 100%) !important;
+            box-shadow:
+                0 14px 34px rgba(23, 182, 214, .20),
+                0 0 0 3px rgba(118, 228, 197, .13) !important;
+            color: #07111f !important;
+            transition: transform .16s ease, box-shadow .16s ease, filter .16s ease !important;
+        }}
+
+        .st-key-top_nav_home button * {{
+            color: #07111f !important;
+            font-weight: 800 !important;
+            font-size: .92rem !important;
+        }}
+
+        .st-key-top_nav_home button:hover {{
+            box-shadow:
+                0 18px 42px rgba(23, 182, 214, .30),
+                0 0 0 4px rgba(118, 228, 197, .19) !important;
+            filter: brightness(1.04);
+            transform: translateY(-1px);
         }}
 
         @media (max-width: 900px) {{
@@ -211,12 +306,17 @@ def _id_key(value: Any) -> str:
     return str(value)
 
 
-def _map_selection_key(selected_station_ids: list[Any], show_only_selected: bool = False) -> str:
+def _map_selection_key(
+    selected_station_ids: list[Any],
+    show_only_selected: bool = False,
+    classification_parameter: Any = None,
+) -> str:
     """Формирует ключ карты, зависящий от текущего выбора станций.
 
     Args:
         selected_station_ids: Текущий список выбранных метеостанций.
         show_only_selected: Скрыты ли невыбранные станции.
+        classification_parameter: Параметр тематической раскраски или None.
 
     Returns:
         Уникальный ключ виджета карты для текущего состояния выбора.
@@ -224,7 +324,8 @@ def _map_selection_key(selected_station_ids: list[Any], show_only_selected: bool
 
     suffix = "_".join(_id_key(item_id) for item_id in selected_station_ids) or "empty"
     mode = "selected_only" if show_only_selected else "all"
-    return f"dashboard_stations_map_{mode}_{suffix}"
+    classification = f"classified_{classification_parameter}" if classification_parameter is not None else "default"
+    return f"dashboard_stations_map_{mode}_{classification}_{suffix}"
 
 
 def _next_station_selection(current_ids: list[Any], map_ids: list[Any] | None) -> list[Any] | None:
@@ -281,6 +382,156 @@ def _remember_dashboard_filters(selected_station_ids: list[Any], date_from: Any,
     remember_selection(station_id=selected_station_ids[0] if selected_station_ids else None)
     if not selected_station_ids:
         st.session_state["selected_station_id"] = None
+
+
+def _map_classification_signature(
+    stations: list[dict],
+    classification_parameter: Any,
+    date_from: Any,
+    date_to: Any,
+    aggregation: str,
+) -> tuple[str, ...]:
+    """Формирует ключ кэша тематической раскраски карты.
+
+    Args:
+        stations: Справочник отображаемых метеостанций.
+        classification_parameter: Климатический параметр классификации.
+        date_from: Начальная дата периода.
+        date_to: Конечная дата периода.
+        aggregation: Агрегация временных рядов.
+
+    Returns:
+        Hashable-подпись параметров расчёта средних значений.
+    """
+
+    station_ids = [station_id(station) for station in stations if station_id(station) is not None]
+    return (
+        str(classification_parameter),
+        date_from.isoformat(),
+        date_to.isoformat(),
+        aggregation,
+        str(len(station_ids)),
+        str(station_ids[0]) if station_ids else "",
+        str(station_ids[-1]) if station_ids else "",
+    )
+
+
+def _map_classification_values(
+    stations: list[dict],
+    classification_parameter: Any,
+    date_from: Any,
+    date_to: Any,
+    aggregation: str,
+) -> dict[str, float]:
+    """Загружает средние значения параметра по станциям с session-кэшированием.
+
+    Args:
+        stations: Справочник отображаемых метеостанций.
+        classification_parameter: Климатический параметр классификации.
+        date_from: Начальная дата периода.
+        date_to: Конечная дата периода.
+        aggregation: Агрегация временных рядов.
+
+    Returns:
+        Словарь `station_id -> среднее значение`.
+
+    Raises:
+        ApiError: Если backend не смог рассчитать сравнение станций.
+    """
+
+    signature = _map_classification_signature(stations, classification_parameter, date_from, date_to, aggregation)
+    cached = st.session_state.get("dashboard_map_classification_cache") or {}
+    if cached.get("signature") == signature:
+        return cached.get("values") or {}
+
+    station_ids = [station_id(station) for station in stations if station_id(station) is not None]
+    response = comparisons.compare_stations(
+        {
+            "station_ids": station_ids,
+            "parameter_id": classification_parameter,
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "aggregation": aggregation,
+            "metric": "mean",
+            "skip_missing": True,
+        }
+    )
+    values: dict[str, float] = {}
+    for record in unwrap_records(response, ("stations", "results", "data", "items")):
+        current_station_id = station_id(record)
+        raw_value = record.get("mean")
+        if raw_value is None:
+            raw_value = record.get("value")
+        try:
+            number = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if current_station_id is not None and math.isfinite(number):
+            values[_id_key(current_station_id)] = round(number, 3)
+
+    st.session_state["dashboard_map_classification_cache"] = {
+        "signature": signature,
+        "values": values,
+    }
+    return values
+
+
+def _classified_station_records(stations: list[dict], values: dict[str, float]) -> list[dict]:
+    """Добавляет станциям средние значения для тематической карты.
+
+    Args:
+        stations: Справочник метеостанций.
+        values: Средние значения по строковому идентификатору станции.
+
+    Returns:
+        Копии записей станций с полем значения классификации.
+    """
+
+    return [
+        {
+            **station,
+            MAP_CLASSIFICATION_VALUE_KEY: values.get(_id_key(station_id(station))),
+        }
+        for station in stations
+    ]
+
+
+def _render_map_classification_legend(parameter: dict, values: dict[str, float], stations_count: int) -> None:
+    """Отображает легенду градиента тематической карты.
+
+    Args:
+        parameter: Запись климатического параметра.
+        values: Средние значения по станциям.
+        stations_count: Общее количество точек на карте.
+
+    Returns:
+        None.
+    """
+
+    if not values:
+        return
+
+    lower = min(values.values())
+    upper = max(values.values())
+    title = escape(parameter_label(parameter))
+    st.markdown(
+        f"""
+        <div style="margin:.35rem 0 .55rem;padding:.85rem 1rem;border-radius:16px;
+                    border:1px solid rgba(13,100,216,.16);background:rgba(255,255,255,.82);">
+            <strong>Среднее за выбранный период: {title}</strong>
+            <div style="height:.72rem;margin:.55rem 0 .28rem;border-radius:999px;
+                        background:linear-gradient(90deg,#0d64d8,#17b6d6,#76e4c5,#ffb020,#ea580c);"></div>
+            <div style="display:flex;justify-content:space-between;color:#39536f;font-size:.82rem;">
+                <span>{lower:.2f}</span><span>{upper:.2f}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        f"Классифицировано станций: {len(values)} из {stations_count}. "
+        "Выбранные станции остаются оранжевыми; точки без данных отображаются нейтральным цветом."
+    )
 
 
 def _saved_set_payloads(
@@ -342,7 +593,7 @@ def _render_saved_set_block(
         "Все климатические показатели сохраняются автоматически в selected_parameters, "
         "а в parameter_id записывается первый показатель из справочника для совместимости с backend-моделью."
     )
-    with st.container(border=True):
+    with st.container(border=True, key="dashboard_saved_set_parameters"):
         mode = st.selectbox(
             "Режим набора",
             options=list(SAVE_SET_MODES),
@@ -548,18 +799,10 @@ def _render_feature_card(feature: dict[str, str]) -> None:
         """,
         unsafe_allow_html=True,
     )
+
     button_label = feature.get("button_label", "Открыть")
-    button_key = f"open_{feature['path'].replace('/', '_').replace('.', '_')}"
-    if feature.get("secondary_path"):
-        secondary_key = f"open_{feature['secondary_path'].replace('/', '_').replace('.', '_')}"
-        action_left, action_right = st.columns(2)
-        with action_left:
-            if st.button(f"{feature['icon']} {button_label}", key=button_key, use_container_width=True):
-                st.switch_page(feature["path"])
-        with action_right:
-            if st.button(f"{feature['secondary_icon']} {feature['secondary_label']}", key=secondary_key, use_container_width=True):
-                st.switch_page(feature["secondary_path"])
-        return
+    button_key = feature.get("button_key") or f"open_{feature['path'].replace('/', '_').replace('.', '_')}"
+
     if st.button(f"{feature['icon']} {button_label}", key=button_key, use_container_width=True):
         st.switch_page(feature["path"])
 
@@ -567,6 +810,7 @@ def _render_feature_card(feature: dict[str, str]) -> None:
 setup_page("Исследовательская панель")
 init_session_state()
 require_auth()
+_apply_pending_dashboard_reset()
 render_sidebar()
 page_title("Исследовательская панель", "Единое место для выбора периода, метеостанций и сценария анализа.")
 _render_top_navigation()
@@ -580,6 +824,67 @@ except ApiError as error:
     st.stop()
 
 default_station_ids = st.session_state.get("dashboard_station_ids") or []
+
+if not default_station_ids:
+    st.session_state["dashboard_map_show_only_selected"] = False
+with st.sidebar:
+    st.subheader("Настройки карты")
+    show_only_selected_on_map = st.checkbox(
+        "Показывать только выбранные метеостанции",
+        disabled=not default_station_ids,
+        key="dashboard_map_show_only_selected",
+    )
+    classification_parameter_options = [
+        parameter_id(parameter)
+        for parameter in parameters
+        if parameter_id(parameter) is not None
+    ]
+    parameters_by_id = {
+        parameter_id(parameter): parameter
+        for parameter in parameters
+        if parameter_id(parameter) is not None
+    }
+    map_classification_enabled = st.checkbox(
+        "Классификация по среднему значению",
+        key="dashboard_map_classification_enabled",
+    )
+    map_classification_parameter = st.selectbox(
+        "Параметр классификации",
+        options=classification_parameter_options,
+        format_func=lambda item: parameter_label(parameters_by_id[item]),
+        disabled=not map_classification_enabled,
+        key="dashboard_map_classification_parameter",
+    )
+    selected_station_color = st.color_picker(
+        "Выбранные станции",
+        value="#f59e0b",
+        key="dashboard_map_selected_color",
+    )
+    real_station_color = st.color_picker(
+        "Станции с реальными данными",
+        value="#4a95ff",
+        key="dashboard_map_real_color",
+    )
+    synthetic_station_color = st.color_picker(
+        "Станции со сгенерированными данными",
+        value="#062245",
+        key="dashboard_map_synthetic_color",
+    )
+    dashboard_map_basemap = st.selectbox(
+        "Подложка карты",
+        options=list(BASEMAP_LABELS),
+        format_func=lambda item: BASEMAP_LABELS[item],
+        key="dashboard_map_basemap",
+    )
+    st.caption(
+        "Классификация использует средние значения за выбранный период. "
+        "Цвет выбранной станции остаётся оранжевым."
+    )
+dashboard_map_palette = station_map_palette(
+    selected_station_color,
+    real_station_color,
+    synthetic_station_color,
+)
 
 st.markdown(
     """
@@ -595,39 +900,118 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.subheader("Глобальные фильтры")
-filter_cols = st.columns([0.56, 0.44])
-with filter_cols[0]:
-    selected_station_ids = multiselect_stations(stations, key="dashboard_station_multiselect", default_ids=default_station_ids)
-with filter_cols[1]:
-    aggregation = select_aggregation("dashboard_aggregation_select")
+st.markdown(
+    """
+    <style>
+    .st-key-open-dashboard-reset button {
+        background: rgba(255, 176, 32, .16) !important;
+        border: 1px solid rgba(234, 88, 12, .46) !important;
+        color: #9a3412 !important;
+        min-height: 2.75rem !important;
+        box-shadow: 0 10px 24px rgba(234, 88, 12, .12) !important;
+    }
+    .st-key-open-dashboard-reset button:hover {
+        background: rgba(255, 176, 32, .26) !important;
+        border-color: rgba(234, 88, 12, .72) !important;
+        transform: translateY(-1px);
+    }
+    .st-key-open-dashboard-reset button * {
+        color: #9a3412 !important;
+        font-weight: 800 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-date_from, date_to = date_period("dashboard_period", allow_empty=True)
-selected_stations = _selected_station_records(stations, selected_station_ids)
+with st.container(border=True, key="dashboard_global_filters"):
+    filter_title_column, reset_column = st.columns([0.72, 0.28], vertical_alignment="bottom")
+    with filter_title_column:
+        st.subheader("Глобальные фильтры")
+    with reset_column:
+        if st.button("🧹 Быстрый сброс данных", key="open-dashboard-reset", use_container_width=True):
+            _render_reset_dashboard_dialog()
 
-_remember_dashboard_filters(selected_station_ids, date_from, date_to, aggregation)
-_render_slice_summary(selected_stations, date_from, date_to, aggregation)
+    if st.session_state.pop("dashboard_reset_notice", False):
+        st.success("Данные панели сброшены. Можно собрать новый аналитический срез.")
+
+    filter_cols = st.columns([0.56, 0.44])
+    with filter_cols[0]:
+        selected_station_ids = multiselect_stations(stations, key="dashboard_station_multiselect", default_ids=default_station_ids)
+    with filter_cols[1]:
+        aggregation = select_aggregation("dashboard_aggregation_select")
+
+    date_from, date_to = date_period("dashboard_period", allow_empty=True)
+    selected_stations = _selected_station_records(stations, selected_station_ids)
+
+    _remember_dashboard_filters(selected_station_ids, date_from, date_to, aggregation)
+    render_station_period_availability_notice(
+        selected_stations,
+        date_from,
+        date_to,
+        [parameter_id(parameter) for parameter in parameters if parameter_id(parameter) is not None],
+    )
+    _render_slice_summary(selected_stations, date_from, date_to, aggregation)
 
 st.subheader("Карта метеостанций")
-if not selected_station_ids:
-    st.session_state["dashboard_map_show_only_selected"] = False
-show_only_selected_on_map = st.checkbox(
-    "Показывать на карте только выбранные метеостанции",
-    disabled=not selected_station_ids,
-    key="dashboard_map_show_only_selected",
-)
 st.caption(
     "Кликните по точке, чтобы выбрать метеостанцию. "
-    "Оранжевые точки - выбранные станции, синие - доступные станции справочника."
+    "Настройки цветов и тематической классификации находятся в sidebar."
 )
+
+map_station_records = stations
+map_value_key = None
+map_value_label = None
+map_classification = None
+if map_classification_enabled:
+    if date_from and date_to:
+        try:
+            with st.spinner("Рассчитываю средние значения для классификации карты..."):
+                classification_values = _map_classification_values(
+                    stations,
+                    map_classification_parameter,
+                    date_from,
+                    date_to,
+                    aggregation,
+                )
+        except ApiError as error:
+            st.warning(f"Не удалось построить классификацию карты: {error}")
+            classification_values = {}
+
+        if classification_values:
+            classification_parameter = parameters_by_id.get(map_classification_parameter, {})
+            map_station_records = _classified_station_records(stations, classification_values)
+            map_value_key = MAP_CLASSIFICATION_VALUE_KEY
+            map_value_label = f"Среднее за период · {parameter_label(classification_parameter)}"
+            map_classification = {
+                "value_key": MAP_CLASSIFICATION_VALUE_KEY,
+                "min_value": min(classification_values.values()),
+                "max_value": max(classification_values.values()),
+            }
+            _render_map_classification_legend(classification_parameter, classification_values, len(stations))
+        else:
+            st.warning("Для выбранного параметра и периода нет значений для классификации карты.")
+    else:
+        st.info("Чтобы включить классификацию карты, выберите начало и конец периода в глобальных фильтрах.")
+
 map_selected_station_ids = render_stations_map(
-    stations,
+    map_station_records,
+    value_key=map_value_key,
+    value_label=map_value_label,
     selected_ids=selected_station_ids,
     selectable=True,
-    selection_key=_map_selection_key(selected_station_ids, show_only_selected_on_map),
+    selection_key=_map_selection_key(
+        selected_station_ids,
+        show_only_selected_on_map,
+        map_classification_parameter if map_classification else None,
+    ),
     selection_mode="multi-object",
     show_only_selected=show_only_selected_on_map,
     initial_view_state=EURASIA_MAP_VIEW,
+    color_map=dashboard_map_palette,
+    classification=map_classification,
+    fit_visible_points=show_only_selected_on_map,
+    basemap=dashboard_map_basemap,
 )
 if st.session_state.pop("dashboard_ignore_next_map_selection", False):
     map_selected_station_ids = None
@@ -636,6 +1020,57 @@ if next_station_ids is not None and [_id_key(item) for item in next_station_ids]
     st.session_state["dashboard_map_pending_station_ids"] = next_station_ids
     st.rerun()
 _render_station_info_block(selected_stations)
+
+feature_button_selectors = ",\n".join(
+    f".st-key-{feature['button_key']} button"
+    for feature in FEATURES
+    if feature.get("button_key")
+)
+
+feature_button_text_selectors = ",\n".join(
+    f".st-key-{feature['button_key']} button *"
+    for feature in FEATURES
+    if feature.get("button_key")
+)
+
+feature_button_hover_selectors = ",\n".join(
+    f".st-key-{feature['button_key']} button:hover"
+    for feature in FEATURES
+    if feature.get("button_key")
+)
+
+st.markdown(
+    f"""
+    <style>
+    {feature_button_selectors} {{
+        min-height: 3.65rem !important;
+        background: linear-gradient(135deg, #ffb020 0%, #f97316 55%, #ea580c 100%) !important;
+        border: 1px solid rgba(255, 255, 255, .78) !important;
+        box-shadow:
+            0 16px 34px rgba(234, 88, 12, .34),
+            0 0 0 4px rgba(249, 115, 22, .14) !important;
+        color: #ffffff !important;
+        font-size: 1.05rem !important;
+        letter-spacing: .01em !important;
+        transition: transform .16s ease, box-shadow .16s ease, filter .16s ease !important;
+    }}
+
+    {feature_button_text_selectors} {{
+        color: #ffffff !important;
+        font-weight: 800 !important;
+    }}
+
+    {feature_button_hover_selectors} {{
+        transform: translateY(-1px);
+        filter: brightness(1.04);
+        box-shadow:
+            0 20px 42px rgba(234, 88, 12, .42),
+            0 0 0 5px rgba(249, 115, 22, .18) !important;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 st.subheader("Возможности анализа")
 st.caption("Ниже находятся основные рабочие сценарии. Они используют выбранный выше контекст как стартовые значения.")

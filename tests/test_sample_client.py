@@ -140,6 +140,28 @@ def test_sample_client_saves_analysis_set_per_station() -> None:
     assert saved_sets[0]["id"] == record["id"]
 
 
+def test_sample_station_comparison_can_skip_missing_series() -> None:
+    """Проверяет пропуск станций без данных в режиме тематической карты."""
+
+    client = SampleApiClient(token="sample")
+    imported_station = next(station for station in client.get("/stations")["items"] if station.get("source_id") == "OMAM0")
+    result = client.post(
+        "/comparisons/stations",
+        json={
+            "station_ids": [imported_station["id"]],
+            "parameter_id": 1,
+            "date_from": "1990-01-01",
+            "date_to": "1991-01-01",
+            "aggregation": "monthly",
+            "metric": "mean",
+            "skip_missing": True,
+        },
+    )
+
+    assert result["stations"] == []
+    assert result["skipped_stations"] == 1
+
+
 def test_sample_client_returns_correlation_matrix_and_pairs() -> None:
     """Проверяет sample-ответ корреляционного анализа.
 

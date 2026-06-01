@@ -25,6 +25,12 @@ _ANALYSIS_HISTORY: list[dict] = []
 _ANALYSIS_RESULTS: dict[int, dict] = {}
 _REPORTS: dict[int, dict] = {}
 _SAVED_ANALYSIS_SETS: list[dict] = []
+_STATIONS_BY_ID = {int(station["id"]): station for station in STATIONS}
+_OBSERVATIONS_BY_STATION_PARAMETER: dict[tuple[int, int], list[dict]] = defaultdict(list)
+for _observation in OBSERVATIONS:
+    _OBSERVATIONS_BY_STATION_PARAMETER[
+        (int(_observation["station_id"]), int(_observation["parameter_id"]))
+    ].append(_observation)
 
 
 def _parse_date(value: str | date) -> date:
@@ -92,9 +98,9 @@ def _station(station_id: int | str) -> dict:
     """
 
     sid = int(station_id)
-    for station in STATIONS:
-        if station["id"] == sid:
-            return station
+    station = _STATIONS_BY_ID.get(sid)
+    if station:
+        return station
     raise ApiError("Станция не найдена в sample dataset.", status_code=404, code="STATION_NOT_FOUND")
 
 
@@ -122,8 +128,8 @@ def _observations(station_id: int | str, parameter_id: int | str, date_from: str
     station = _station(station_id)
     rows = [
         row
-        for row in OBSERVATIONS
-        if row["station_id"] == sid and row["parameter_id"] == pid and start <= _parse_date(row["observed_at"]) <= end
+        for row in _OBSERVATIONS_BY_STATION_PARAMETER.get((sid, pid), [])
+        if start <= _parse_date(row["observed_at"]) <= end
     ]
     if not rows:
         rows = [
@@ -606,18 +612,26 @@ def _compare_stations(payload: dict) -> dict:
     """
 
     metric = payload.get("metric", "mean")
+    skip_missing = bool(payload.get("skip_missing"))
     results = []
+    skipped_stations = 0
     for station_id in payload["station_ids"]:
-        station = _station(station_id)
-        series = _series(
-            {
-                "station_id": station_id,
-                "parameter_id": payload["parameter_id"],
-                "date_from": payload["date_from"],
-                "date_to": payload["date_to"],
-                "aggregation": payload.get("aggregation", "monthly"),
-            }
-        )
+        try:
+            station = _station(station_id)
+            series = _series(
+                {
+                    "station_id": station_id,
+                    "parameter_id": payload["parameter_id"],
+                    "date_from": payload["date_from"],
+                    "date_to": payload["date_to"],
+                    "aggregation": payload.get("aggregation", "monthly"),
+                }
+            )
+        except ApiError:
+            if not skip_missing:
+                raise
+            skipped_stations += 1
+            continue
         stats = _basic_statistics([float(item["value"]) for item in series])
         results.append(
             {
@@ -630,7 +644,11 @@ def _compare_stations(payload: dict) -> dict:
                 "value": stats.get(metric),
             }
         )
-    return {"metric": metric, "stations": sorted(results, key=lambda item: item.get("value") or 0, reverse=True)}
+    return {
+        "metric": metric,
+        "stations": sorted(results, key=lambda item: item.get("value") or 0, reverse=True),
+        "skipped_stations": skipped_stations,
+    }
 
 
 def _rank(values: list[float]) -> list[float]:

@@ -13,9 +13,17 @@ from app.api import comparisons, observations
 from app.api.client import ApiError
 from app.components.charts import render_bar_chart, render_multi_timeseries_chart
 from app.components.errors import render_api_error
-from app.components.filters import date_period, load_parameters, load_stations, multiselect_stations, select_aggregation, select_parameter
+from app.components.filters import (
+    date_period,
+    load_parameters,
+    load_stations,
+    multiselect_stations,
+    render_period_availability_notice,
+    select_aggregation,
+    select_parameter,
+)
 from app.components.layout import page_title, render_home_button, setup_page
-from app.components.maps import render_stations_map
+from app.components.maps import BASEMAP_LABELS, EURASIA_MAP_VIEW, render_stations_map, station_map_palette
 from app.components.sidebar import render_sidebar
 from app.components.tables import render_json_preview, render_table
 from app.state.session import init_session_state, require_auth
@@ -105,6 +113,75 @@ def _render_station_palette(stations: list[dict], selected_station_ids: list[obj
     return colors
 
 
+def _render_map_settings(selected_station_ids: list[object]) -> tuple[bool, dict[str, list[int]], str]:
+    """Отображает настройки карты сравнения станций в sidebar.
+
+    Args:
+        selected_station_ids: Идентификаторы выбранных метеостанций.
+
+    Returns:
+        Флаг показа только выбранных станций, RGBA-палитра и код подложки карты.
+    """
+
+    if not selected_station_ids:
+        st.session_state.pop("compare_map_show_only_selected", None)
+    st.subheader("Настройки карты")
+    show_only_selected = st.checkbox(
+        "Показывать только выбранные метеостанции",
+        value=True,
+        disabled=not selected_station_ids,
+        key="compare_map_show_only_selected",
+    )
+    selected_color = st.color_picker(
+        "Выбранные станции",
+        value="#f59e0b",
+        key="compare_map_selected_color",
+    )
+    real_color = st.color_picker(
+        "Станции с реальными данными",
+        value="#4a95ff",
+        key="compare_map_real_color",
+    )
+    synthetic_color = st.color_picker(
+        "Станции со сгенерированными данными",
+        value="#062245",
+        key="compare_map_synthetic_color",
+    )
+    basemap = st.selectbox(
+        "Подложка карты",
+        options=list(BASEMAP_LABELS),
+        format_func=lambda item: BASEMAP_LABELS[item],
+        key="compare_map_basemap",
+    )
+    st.caption("Настройки применяются к карте результатов сравнения.")
+    return show_only_selected, station_map_palette(selected_color, real_color, synthetic_color), basemap
+
+
+def _map_station_records(stations: list[dict], comparison_records: list[dict]) -> list[dict]:
+    """Обогащает справочник станций метриками результата сравнения.
+
+    Args:
+        stations: Полный справочник метеостанций.
+        comparison_records: Результаты сравнения выбранных станций.
+
+    Returns:
+        Станции с добавленными полями метрик сравнения.
+    """
+
+    metrics_by_station = {
+        str(station_id(record)): record
+        for record in comparison_records
+        if station_id(record) is not None
+    }
+    return [
+        {
+            **station,
+            **metrics_by_station.get(str(station_id(station)), {}),
+        }
+        for station in stations
+    ]
+
+
 def _load_station_timeseries(
     stations: list[dict],
     selected_station_ids: list[object],
@@ -155,16 +232,22 @@ page_title("Сравнение станций", "Несколько метеос
 render_home_button()
 
 try:
-    with st.sidebar:
-        stations = load_stations()
-        parameters = load_parameters()
+    stations = load_stations()
+    parameters = load_parameters()
+    with st.container(border=True, key="station_comparison_parameters"):
+        st.subheader("Параметры сравнения")
         selected_stations = multiselect_stations(stations, "compare_stations")
-        station_colors = _render_station_palette(stations, selected_stations)
         parameter = select_parameter(parameters, key="compare_station_parameter")
         aggregation = select_aggregation("compare_station_aggregation")
         metric = st.selectbox("Метрика", ["mean", "min", "max", "std", "sum"])
         date_from, date_to = date_period("compare_stations_period")
+        render_period_availability_notice(selected_stations, [parameter], date_from, date_to)
         run_clicked = st.button("Сравнить станции", type="primary", use_container_width=True)
+
+    with st.sidebar:
+        st.subheader("Настройки отображения")
+        station_colors = _render_station_palette(stations, selected_stations)
+        show_only_selected_on_map, comparison_map_palette, comparison_map_basemap = _render_map_settings(selected_stations)
 except ApiError as error:
     render_api_error(error)
     st.stop()
@@ -227,8 +310,17 @@ render_bar_chart(
     color_map=station_colors,
 )
 
-selected_station_records = [station for station in stations if station_id(station) in selected_stations]
+map_records = _map_station_records(stations, records if isinstance(records, list) else [])
 st.subheader("Карта станций")
-render_stations_map(records or selected_station_records, value_key=metric)
+render_stations_map(
+    map_records,
+    value_key=metric,
+    selected_ids=selected_stations,
+    show_only_selected=show_only_selected_on_map,
+    initial_view_state=EURASIA_MAP_VIEW,
+    color_map=comparison_map_palette,
+    fit_visible_points=show_only_selected_on_map,
+    basemap=comparison_map_basemap,
+)
 render_json_preview(result, "Полный JSON сравнения")
 

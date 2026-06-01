@@ -14,7 +14,14 @@ from app.api import analysis
 from app.api.client import ApiError
 from app.components.charts import render_correlation_heatmap, render_correlation_scatter
 from app.components.errors import render_api_error
-from app.components.filters import date_period, load_parameters, load_stations, select_aggregation, select_station
+from app.components.filters import (
+    date_period,
+    load_parameters,
+    load_stations,
+    render_period_availability_notice,
+    select_aggregation,
+    select_station,
+)
 from app.components.layout import page_title, render_home_button, setup_page
 from app.components.sidebar import render_sidebar
 from app.components.tables import render_json_preview, render_table
@@ -116,8 +123,8 @@ page_title("Корреляционный анализ", "Оценка связи
 render_home_button()
 
 try:
-    with st.sidebar:
-        st.header("Параметры корреляции")
+    with st.container(border=True, key="correlation_parameters_form"):
+        st.subheader("Параметры расчёта")
         stations = load_stations()
         parameters = load_parameters()
         station = select_station(stations, key="correlation_station")
@@ -130,6 +137,7 @@ try:
             key="correlation_method",
         )
         date_from, date_to = date_period("correlation_period")
+        render_period_availability_notice([station], selected_parameter_ids, date_from, date_to)
         remember_selection(station_id=station, parameter_id=selected_parameter_ids[0] if selected_parameter_ids else None)
         run_clicked = st.button("Рассчитать корреляции", type="primary", use_container_width=True)
 except ApiError as error:

@@ -111,6 +111,61 @@ def apply_global_styles() -> None:
             background: linear-gradient(135deg, var(--klima-blue), var(--klima-cyan));
             border: 0;
         }
+        .st-key-go_home_button button {
+            min-height: 3rem;
+            border: 1px solid rgba(255, 255, 255, .78) !important;
+            background: linear-gradient(135deg, #ffb020 0%, #f97316 55%, #ea580c 100%) !important;
+            box-shadow:
+                0 14px 30px rgba(234, 88, 12, .28),
+                0 0 0 4px rgba(249, 115, 22, .11) !important;
+            color: #ffffff !important;
+            transition: transform .16s ease, box-shadow .16s ease, filter .16s ease !important;
+        }
+        .st-key-go_home_button button:hover {
+            box-shadow:
+                0 18px 38px rgba(234, 88, 12, .38),
+                0 0 0 5px rgba(249, 115, 22, .18) !important;
+            filter: brightness(1.05);
+            transform: translateY(-2px);
+        }
+        .st-key-go_home_button button:focus-visible {
+            outline: 3px solid rgba(249, 115, 22, .28);
+            outline-offset: 3px;
+        }
+        .st-key-go_home_button button * {
+            color: #ffffff !important;
+            font-weight: 800 !important;
+        }
+        .st-key-dashboard_global_filters,
+        .st-key-dashboard_saved_set_parameters,
+        .st-key-analysis_parameters,
+        .st-key-period_comparison_parameters,
+        .st-key-station_comparison_parameters,
+        .st-key-climatogram_parameters,
+        .st-key-forecast_parameters,
+        .st-key-history_parameters,
+        .st-key-report_parameters,
+        .st-key-correlation_parameters_form {
+            padding: 1.2rem 1.25rem 1.3rem !important;
+            border: 1px solid rgba(13, 100, 216, .22) !important;
+            border-radius: 22px !important;
+            background:
+                radial-gradient(circle at 92% 8%, rgba(118, 228, 197, .26), transparent 16rem),
+                linear-gradient(135deg, rgba(219, 234, 254, .82), rgba(240, 253, 250, .90)) !important;
+            box-shadow: 0 18px 42px rgba(13, 100, 216, .11) !important;
+        }
+        .st-key-dashboard_global_filters h3,
+        .st-key-dashboard_saved_set_parameters h3,
+        .st-key-analysis_parameters h3,
+        .st-key-period_comparison_parameters h3,
+        .st-key-station_comparison_parameters h3,
+        .st-key-climatogram_parameters h3,
+        .st-key-forecast_parameters h3,
+        .st-key-history_parameters h3,
+        .st-key-report_parameters h3,
+        .st-key-correlation_parameters_form h3 {
+            color: #0a4b9e !important;
+        }
         [data-testid="stPageLink"] a {
             display: flex;
             align-items: center;

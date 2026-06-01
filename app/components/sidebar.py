@@ -36,11 +36,26 @@ def render_sidebar() -> None:
                 section[data-testid="stSidebar"] div[data-testid="stButton"] button * {
                     color: #07111f !important;
                 }
+                section[data-testid="stSidebar"] .st-key-sidebar_logout button {
+                    transition: transform .16s ease, box-shadow .16s ease, filter .16s ease !important;
+                }
+                section[data-testid="stSidebar"] .st-key-sidebar_logout button:hover {
+                    border-color: rgba(255, 255, 255, .72) !important;
+                    background: linear-gradient(135deg, #ffb020 0%, #f97316 55%, #ea580c 100%) !important;
+                    box-shadow:
+                        0 14px 28px rgba(234, 88, 12, .34),
+                        0 0 0 4px rgba(249, 115, 22, .14) !important;
+                    filter: brightness(1.05);
+                    transform: translateY(-1px);
+                }
+                section[data-testid="stSidebar"] .st-key-sidebar_logout button:hover * {
+                    color: #ffffff !important;
+                }
                 </style>
                 """,
                 unsafe_allow_html=True,
             )
-            if st.button("Выйти", use_container_width=True):
+            if st.button("Выйти", key="sidebar_logout", use_container_width=True):
                 clear_auth_state()
                 st.rerun()
 

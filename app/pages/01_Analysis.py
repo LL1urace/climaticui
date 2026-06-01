@@ -70,13 +70,17 @@ page_title("Анализ временного ряда", "Выберите ст�
 render_home_button()
 
 try:
-    with st.sidebar:
-        st.header("Параметры анализа")
+    with st.container(border=True, key="analysis_parameters"):
+        st.subheader("Параметры расчёта")
         filters = common_filters("analysis")
         remember_selection(filters["station_id"], filters["parameter_id"])
-        render_availability(filters["station_id"], filters["parameter_id"])
+        render_availability(
+            filters["station_id"],
+            filters["parameter_id"],
+        )
         methods = analysis_methods()
-        options = analysis_options("analysis")
+        with st.expander("Дополнительные параметры методов", expanded=False):
+            options = analysis_options("analysis", filters["station_id"], filters["parameter_id"])
         run_clicked = st.button("Запустить анализ", type="primary", use_container_width=True)
 except ApiError as error:
     render_api_error(error)
