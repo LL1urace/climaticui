@@ -18,6 +18,8 @@ from app.components.filters import (
     date_period,
     load_parameters,
     load_stations,
+    persistent_multiselect,
+    persistent_selectbox,
     render_period_availability_notice,
     select_aggregation,
     select_station,
@@ -48,13 +50,12 @@ def _select_parameters(parameters: list[dict]) -> list[Any]:
 
     options = [parameter_id(parameter) for parameter in parameters]
     by_id = {parameter_id(parameter): parameter for parameter in parameters}
-    default = options[: min(3, len(options))]
-    return st.multiselect(
+    return persistent_multiselect(
         "Параметры",
-        options=options,
-        default=default,
-        format_func=lambda item_id: parameter_label(by_id[item_id]),
+        options,
         key="correlation_parameters",
+        default=[],
+        format_func=lambda item_id: parameter_label(by_id[item_id]),
     )
 
 
@@ -130,15 +131,16 @@ try:
         station = select_station(stations, key="correlation_station")
         selected_parameter_ids = _select_parameters(parameters)
         aggregation = select_aggregation("correlation_aggregation")
-        method = st.selectbox(
+        method = persistent_selectbox(
             "Метод",
-            options=list(CORRELATION_METHODS),
-            format_func=lambda item: CORRELATION_METHODS[item],
+            list(CORRELATION_METHODS),
             key="correlation_method",
+            default="pearson",
+            format_func=lambda item: CORRELATION_METHODS[item],
         )
         date_from, date_to = date_period("correlation_period")
         render_period_availability_notice([station], selected_parameter_ids, date_from, date_to)
-        remember_selection(station_id=station, parameter_id=selected_parameter_ids[0] if selected_parameter_ids else None)
+        remember_selection(station_id=station)
         run_clicked = st.button("Рассчитать корреляции", type="primary", use_container_width=True)
 except ApiError as error:
     render_api_error(error)

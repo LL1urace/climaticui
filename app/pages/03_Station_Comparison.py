@@ -18,6 +18,7 @@ from app.components.filters import (
     load_parameters,
     load_stations,
     multiselect_stations,
+    persistent_selectbox,
     render_period_availability_notice,
     select_aggregation,
     select_parameter,
@@ -239,7 +240,12 @@ try:
         selected_stations = multiselect_stations(stations, "compare_stations")
         parameter = select_parameter(parameters, key="compare_station_parameter")
         aggregation = select_aggregation("compare_station_aggregation")
-        metric = st.selectbox("Метрика", ["mean", "min", "max", "std", "sum"])
+        metric = persistent_selectbox(
+            "Метрика",
+            ["mean", "min", "max", "std", "sum"],
+            key="compare_station_metric",
+            default="mean",
+        )
         date_from, date_to = date_period("compare_stations_period")
         render_period_availability_notice(selected_stations, [parameter], date_from, date_to)
         run_clicked = st.button("Сравнить станции", type="primary", use_container_width=True)

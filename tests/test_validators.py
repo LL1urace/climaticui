@@ -59,3 +59,9 @@ def test_periods_overlap() -> None:
 
     assert periods_overlap(date(2020, 1, 1), date(2020, 2, 1), date(2020, 1, 15), date(2020, 3, 1))
     assert not periods_overlap(date(2020, 1, 1), date(2020, 2, 1), date(2020, 2, 2), date(2020, 3, 1))
+
+
+def test_periods_overlap_ignores_incomplete_periods() -> None:
+    """Проверяет отсутствие пересечения до заполнения всех дат."""
+
+    assert not periods_overlap(None, None, None, None)

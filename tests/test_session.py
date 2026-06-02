@@ -18,6 +18,8 @@ def test_clear_dashboard_context_preserves_auth_cache_and_map_preferences(monkey
         "dashboard_date_to": "2024-12-31",
         "dashboard_aggregation": "yearly",
         "dashboard_station_multiselect": [1, 2],
+        "dashboard_parameter": 2,
+        "dashboard_parameter_3": 2,
         "dashboard_aggregation_select": "yearly",
         "dashboard_period_date_from": "2020-01-01",
         "dashboard_period_date_to": "2024-12-31",
@@ -27,6 +29,12 @@ def test_clear_dashboard_context_preserves_auth_cache_and_map_preferences(monkey
         "dashboard_ignore_next_map_selection": True,
         "dashboard_stations_map_selected_only_1_2": {"selection": [1, 2]},
         "dashboard_map_selected_color": "#f59e0b",
+        session.PERSISTED_FORM_VALUES_KEY: {
+            "analysis_station": 1,
+            "analysis_date_from": "2020-01-01",
+        },
+        "analysis_station": 1,
+        "analysis_date_from": "2020-01-01",
     }
     monkeypatch.setattr(session.st, "session_state", state)
 
@@ -35,6 +43,9 @@ def test_clear_dashboard_context_preserves_auth_cache_and_map_preferences(monkey
     assert state["access_token"] == "sample-token"
     assert state["cached_stations"] == [{"id": 1}]
     assert state["dashboard_map_selected_color"] == "#f59e0b"
+    assert state[session.PERSISTED_FORM_VALUES_KEY] == {}
+    assert "analysis_station" not in state
+    assert "analysis_date_from" not in state
     assert state["selected_station_id"] is None
     assert state["selected_parameter_id"] is None
     assert state["dashboard_station_ids"] is None
@@ -44,6 +55,8 @@ def test_clear_dashboard_context_preserves_auth_cache_and_map_preferences(monkey
     assert state["dashboard_map_show_only_selected"] is False
     assert state["dashboard_map_classification_cache"] == {}
     assert "dashboard_station_multiselect" not in state
+    assert "dashboard_parameter" not in state
+    assert "dashboard_parameter_3" not in state
     assert "dashboard_aggregation_select" not in state
     assert "dashboard_period_date_from" not in state
     assert "dashboard_period_date_to" not in state

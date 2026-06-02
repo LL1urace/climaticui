@@ -20,8 +20,10 @@ from app.components.filters import (
     load_parameters,
     load_stations,
     multiselect_stations,
+    persistent_selectbox,
     render_station_period_availability_notice,
     select_aggregation,
+    select_parameter,
 )
 from app.components.layout import page_title, setup_page
 from app.components.maps import (
@@ -157,6 +159,7 @@ def _apply_pending_dashboard_reset() -> None:
     if not st.session_state.pop("dashboard_reset_pending", False):
         return
     clear_dashboard_context()
+    st.session_state["dashboard_filter_revision"] += 1
     st.session_state["dashboard_station_multiselect"] = []
     st.session_state["dashboard_aggregation_select"] = "monthly"
     st.session_state["dashboard_period_date_from"] = None
@@ -173,7 +176,7 @@ def _render_reset_dashboard_dialog() -> None:
     """
 
     st.warning(
-        "Текущий выбор метеостанций, периода и агрегации будет сброшен. "
+        "Текущий выбор метеостанций, параметра, периода и агрегации будет сброшен. "
         "Если этот набор данных важен, сначала сохраните его в блоке «Сохранение набора анализа»."
     )
     st.caption(
@@ -375,11 +378,18 @@ def _next_station_selection(current_ids: list[Any], map_ids: list[Any] | None) -
     return next_ids
 
 
-def _remember_dashboard_filters(selected_station_ids: list[Any], date_from: Any, date_to: Any, aggregation: str) -> None:
+def _remember_dashboard_filters(
+    selected_station_ids: list[Any],
+    selected_parameter: Any,
+    date_from: Any,
+    date_to: Any,
+    aggregation: str,
+) -> None:
     """Сохраняет глобальные фильтры исследовательской панели в session state.
 
     Args:
         selected_station_ids: Идентификаторы выбранных станций.
+        selected_parameter: Основной климатический параметр.
         date_from: Начальная дата общего периода.
         date_to: Конечная дата общего периода.
         aggregation: Код выбранной агрегации.
@@ -389,6 +399,7 @@ def _remember_dashboard_filters(selected_station_ids: list[Any], date_from: Any,
     """
 
     st.session_state["dashboard_station_ids"] = selected_station_ids
+    st.session_state["selected_parameter_id"] = selected_parameter
     st.session_state["dashboard_date_from"] = date_from
     st.session_state["dashboard_date_to"] = date_to
     st.session_state["dashboard_aggregation"] = aggregation
@@ -868,12 +879,14 @@ with st.sidebar:
         "Классификация по среднему значению",
         key="dashboard_map_classification_enabled",
     )
-    map_classification_parameter = st.selectbox(
+    map_classification_parameter = persistent_selectbox(
         "Параметр классификации",
-        options=classification_parameter_options,
+        classification_parameter_options,
+        key="dashboard_map_classification_parameter",
+        default=None,
+        placeholder="Выберите параметр",
         format_func=lambda item: parameter_label(parameters_by_id[item]),
         disabled=not map_classification_enabled,
-        key="dashboard_map_classification_parameter",
     )
     map_classification_gradient = st.selectbox(
         "Цветовой градиент",
@@ -962,21 +975,24 @@ with st.container(border=True, key="dashboard_global_filters"):
     if st.session_state.pop("dashboard_reset_notice", False):
         st.success("Данные панели сброшены. Можно собрать новый аналитический срез.")
 
-    filter_cols = st.columns([0.56, 0.44])
+    filter_cols = st.columns([0.44, 0.32, 0.24])
     with filter_cols[0]:
         selected_station_ids = multiselect_stations(stations, key="dashboard_station_multiselect", default_ids=default_station_ids)
     with filter_cols[1]:
+        parameter_widget_key = f"dashboard_parameter_{st.session_state['dashboard_filter_revision']}"
+        selected_parameter = select_parameter(parameters, key=parameter_widget_key)
+    with filter_cols[2]:
         aggregation = select_aggregation("dashboard_aggregation_select")
 
-    date_from, date_to = date_period("dashboard_period", allow_empty=True)
+    date_from, date_to = date_period("dashboard_period")
     selected_stations = _selected_station_records(stations, selected_station_ids)
 
-    _remember_dashboard_filters(selected_station_ids, date_from, date_to, aggregation)
+    _remember_dashboard_filters(selected_station_ids, selected_parameter, date_from, date_to, aggregation)
     render_station_period_availability_notice(
         selected_stations,
         date_from,
         date_to,
-        [parameter_id(parameter) for parameter in parameters if parameter_id(parameter) is not None],
+        [selected_parameter] if selected_parameter is not None else [],
     )
     _render_slice_summary(selected_stations, date_from, date_to, aggregation)
 
@@ -991,7 +1007,9 @@ map_value_key = None
 map_value_label = None
 map_classification = None
 if map_classification_enabled:
-    if date_from and date_to:
+    if map_classification_parameter is None:
+        st.info("Чтобы включить классификацию карты, выберите параметр в настройках карты.")
+    elif date_from and date_to:
         try:
             with st.spinner("Рассчитываю средние значения для классификации карты..."):
                 classification_values = _map_classification_values(

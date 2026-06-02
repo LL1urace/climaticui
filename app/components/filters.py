@@ -8,6 +8,7 @@ from typing import Any
 import streamlit as st
 
 from app.api import dictionaries, observations
+from app.state.session import persisted_form_value, remember_form_value
 from app.utils.formatters import parameter_id, parameter_label, station_id, station_label, unwrap_records
 from app.utils.validators import ValidationResult, validate_required_filters
 
@@ -32,6 +33,82 @@ ANALYSIS_METHOD_LABELS = {
 CALENDAR_MIN_DATE = date.min
 CALENDAR_MAX_DATE = date.max
 CALENDAR_HELP = "Можно выбрать любую дату. Если за период нет наблюдений, приложение покажет предупреждение."
+
+
+def _remember_shared_widget_value(widget_key: str, shared_key: str) -> None:
+    """Сохраняет изменение основного поля до повторной отрисовки страницы."""
+
+    value = st.session_state.get(widget_key)
+    st.session_state[shared_key] = value
+    if shared_key == "selected_station_id":
+        st.session_state["dashboard_station_ids"] = [value] if value is not None else []
+    elif shared_key == "dashboard_station_ids":
+        st.session_state["selected_station_id"] = value[0] if value else None
+
+
+def persistent_selectbox(
+    label: str,
+    options: list[Any],
+    key: str,
+    default: Any = None,
+    shared_key: str | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Отображает selectbox с локальным или общим сохранением значения."""
+
+    stored_value = st.session_state.get(shared_key, default) if shared_key else persisted_form_value(key, default)
+    index = options.index(stored_value) if stored_value in options else None
+    if shared_key:
+        kwargs["on_change"] = _remember_shared_widget_value
+        kwargs["args"] = (key, shared_key)
+    value = st.selectbox(label, options=options, index=index, key=key, **kwargs)
+    if shared_key:
+        st.session_state[shared_key] = value
+    else:
+        remember_form_value(key, value)
+    return value
+
+
+def persistent_multiselect(
+    label: str,
+    options: list[Any],
+    key: str,
+    default: list[Any] | None = None,
+    shared_key: str | None = None,
+    **kwargs: Any,
+) -> list[Any]:
+    """Отображает multiselect с локальным или общим сохранением значения."""
+
+    stored_value = st.session_state.get(shared_key, default or []) if shared_key else persisted_form_value(key, default or [])
+    selected = [item for item in stored_value if item in options] if isinstance(stored_value, list) else []
+    widget_options = {"options": options, "key": key, **kwargs}
+    if shared_key:
+        widget_options["on_change"] = _remember_shared_widget_value
+        widget_options["args"] = (key, shared_key)
+    if key not in st.session_state:
+        widget_options["default"] = selected
+    value = st.multiselect(label, **widget_options)
+    if shared_key:
+        st.session_state[shared_key] = value
+    else:
+        remember_form_value(key, value)
+    return value
+
+
+def persistent_number_input(label: str, key: str, default: int | float, **kwargs: Any) -> int | float:
+    """Отображает числовое поле и сохраняет значение между страницами."""
+
+    value = st.number_input(label, value=persisted_form_value(key, default), key=key, **kwargs)
+    remember_form_value(key, value)
+    return value
+
+
+def persistent_text_input(label: str, key: str, default: str = "", **kwargs: Any) -> str:
+    """Отображает текстовое поле и сохраняет значение между страницами."""
+
+    value = st.text_input(label, value=persisted_form_value(key, default), key=key, **kwargs)
+    remember_form_value(key, value)
+    return value
 
 
 def load_climate_zones() -> list[dict]:
@@ -95,9 +172,19 @@ def select_station(stations: list[dict], key: str = "station_select") -> Any:
         return None
     options = [station_id(station) for station in stations]
     by_id = {station_id(station): station for station in stations}
-    default = st.session_state.get("selected_station_id")
-    index = options.index(default) if default in options else 0
-    return st.selectbox("Метеостанция", options=options, index=index, format_func=lambda item_id: station_label(by_id[item_id]), key=key)
+    previous = st.session_state.get("selected_station_id")
+    selected = persistent_selectbox(
+        "Метеостанция",
+        options,
+        key,
+        default=previous,
+        shared_key="selected_station_id",
+        placeholder="Выберите метеостанцию",
+        format_func=lambda item_id: station_label(by_id[item_id]),
+    )
+    if selected != previous:
+        st.session_state["dashboard_station_ids"] = [selected] if selected is not None else []
+    return selected
 
 
 def multiselect_stations(stations: list[dict], key: str = "station_multiselect", default_ids: list[Any] | None = None) -> list[Any]:
@@ -115,24 +202,34 @@ def multiselect_stations(stations: list[dict], key: str = "station_multiselect",
     options = [station_id(station) for station in stations]
     by_id = {station_id(station): station for station in stations}
     stored_default = default_ids if default_ids is not None else st.session_state.get("dashboard_station_ids") or []
-    default = [item_id for item_id in stored_default if item_id in options]
-    widget_options = {
-        "options": options,
-        "format_func": lambda item_id: station_label(by_id[item_id]),
-        "key": key,
-    }
-    if key not in st.session_state:
-        widget_options["default"] = default
-    return st.multiselect("Метеостанции", **widget_options)
+    selected = persistent_multiselect(
+        "Метеостанции",
+        options,
+        key,
+        default=[item_id for item_id in stored_default if item_id in options],
+        shared_key="dashboard_station_ids",
+        format_func=lambda item_id: station_label(by_id[item_id]),
+    )
+    st.session_state["dashboard_station_ids"] = selected
+    st.session_state["selected_station_id"] = selected[0] if selected else None
+    return selected
 
 
-def select_parameter(parameters: list[dict], key: str = "parameter_select", label: str = "Параметр") -> Any:
+def select_parameter(
+    parameters: list[dict],
+    key: str = "parameter_select",
+    label: str = "Параметр",
+    inherit_context: bool = True,
+    remember_context: bool = True,
+) -> Any:
     """Отображает selectbox выбора климатического параметра.
 
     Args:
         parameters: Список параметров из backend API.
         key: Уникальный ключ Streamlit-виджета.
         label: Подпись поля выбора.
+        inherit_context: Нужно ли использовать общий параметр как стартовое значение.
+        remember_context: Нужно ли использовать параметр как общий контекст страниц.
 
     Returns:
         Идентификатор выбранного параметра или None.
@@ -143,9 +240,17 @@ def select_parameter(parameters: list[dict], key: str = "parameter_select", labe
         return None
     options = [parameter_id(parameter) for parameter in parameters]
     by_id = {parameter_id(parameter): parameter for parameter in parameters}
-    default = st.session_state.get("selected_parameter_id")
-    index = options.index(default) if default in options else 0
-    return st.selectbox(label, options=options, index=index, format_func=lambda item_id: parameter_label(by_id[item_id]), key=key)
+    default = st.session_state.get("selected_parameter_id") if inherit_context else None
+    selected = persistent_selectbox(
+        label,
+        options,
+        key,
+        default=default,
+        shared_key="selected_parameter_id" if remember_context else None,
+        placeholder="Выберите параметр",
+        format_func=lambda item_id: parameter_label(by_id[item_id]),
+    )
+    return selected
 
 
 def select_aggregation(key: str = "aggregation_select") -> str:
@@ -160,15 +265,24 @@ def select_aggregation(key: str = "aggregation_select") -> str:
 
     options = list(AGGREGATIONS)
     default = st.session_state.get("dashboard_aggregation")
-    index = options.index(default) if default in options else 1
-    return st.selectbox("Агрегация", options=options, format_func=lambda item: AGGREGATIONS[item], index=index, key=key)
+    selected = persistent_selectbox(
+        "Агрегация",
+        options,
+        key,
+        default=default if default in options else "monthly",
+        shared_key="dashboard_aggregation",
+        format_func=lambda item: AGGREGATIONS[item],
+    )
+    st.session_state["dashboard_aggregation"] = selected
+    return selected
 
 
 def date_period(
     prefix: str = "period",
     default_start: date | None = None,
     default_end: date | None = None,
-    allow_empty: bool = False,
+    inherit_dashboard: bool = True,
+    remember_dashboard: bool = True,
 ) -> tuple[date | None, date | None]:
     """Отображает два поля выбора дат периода.
 
@@ -176,33 +290,47 @@ def date_period(
         prefix: Префикс ключей Streamlit-виджетов.
         default_start: Начальная дата по умолчанию.
         default_end: Конечная дата по умолчанию.
-        allow_empty: Разрешает пустые значения дат без автоподстановки.
+        inherit_dashboard: Использовать ли общий период как стартовое значение.
+        remember_dashboard: Обновлять ли общий период после изменения.
 
     Returns:
         Кортеж из начальной и конечной даты или None для пустых полей.
     """
 
-    today = date.today()
-    stored_start = None if allow_empty else st.session_state.get("dashboard_date_from")
-    stored_end = None if allow_empty else st.session_state.get("dashboard_date_to")
-    fallback_start = None if allow_empty else date(today.year - 5, 1, 1)
-    fallback_end = None if allow_empty else today
+    start_key = f"{prefix}_date_from"
+    end_key = f"{prefix}_date_to"
+    shared_start = st.session_state.get("dashboard_date_from") if inherit_dashboard else None
+    shared_end = st.session_state.get("dashboard_date_to") if inherit_dashboard else None
+    fallback_start = default_start or shared_start
+    fallback_end = default_end or shared_end
+    stored_start = st.session_state.get("dashboard_date_from", fallback_start) if remember_dashboard else persisted_form_value(start_key, fallback_start)
+    stored_end = st.session_state.get("dashboard_date_to", fallback_end) if remember_dashboard else persisted_form_value(end_key, fallback_end)
     start = st.date_input(
         "Начало периода",
-        value=default_start or stored_start or fallback_start,
+        value=stored_start,
         min_value=CALENDAR_MIN_DATE,
         max_value=CALENDAR_MAX_DATE,
         help=CALENDAR_HELP,
-        key=f"{prefix}_date_from",
+        key=start_key,
+        on_change=_remember_shared_widget_value if remember_dashboard else None,
+        args=(start_key, "dashboard_date_from") if remember_dashboard else None,
     )
     end = st.date_input(
         "Конец периода",
-        value=default_end or stored_end or fallback_end,
+        value=stored_end,
         min_value=CALENDAR_MIN_DATE,
         max_value=CALENDAR_MAX_DATE,
         help=CALENDAR_HELP,
-        key=f"{prefix}_date_to",
+        key=end_key,
+        on_change=_remember_shared_widget_value if remember_dashboard else None,
+        args=(end_key, "dashboard_date_to") if remember_dashboard else None,
     )
+    if remember_dashboard:
+        st.session_state["dashboard_date_from"] = start
+        st.session_state["dashboard_date_to"] = end
+    else:
+        remember_form_value(start_key, start)
+        remember_form_value(end_key, end)
     return start, end
 
 
@@ -245,10 +373,11 @@ def analysis_methods() -> list[str]:
     """
 
     options = list(ANALYSIS_METHOD_LABELS)
-    return st.multiselect(
+    return persistent_multiselect(
         "Методы анализа",
-        options=options,
-        default=options,
+        options,
+        key="analysis_methods",
+        default=[],
         format_func=lambda item: ANALYSIS_METHOD_LABELS.get(item, item),
     )
 
@@ -265,9 +394,27 @@ def analysis_options(prefix: str = "analysis", station: Any = None, parameter: A
         Словарь options для `POST /analysis/run`.
     """
 
-    window = st.number_input("Окно скользящего среднего", min_value=2, max_value=120, value=12, step=1, key=f"{prefix}_ma_window")
-    extremes_count = st.number_input("Количество экстремумов в таблице", min_value=3, max_value=20, value=5, step=1, key=f"{prefix}_extremes_count")
-    norm_start, norm_end = date_period(prefix=f"{prefix}_norm")
+    window = persistent_number_input(
+        "Окно скользящего среднего",
+        key=f"{prefix}_ma_window",
+        default=12,
+        min_value=2,
+        max_value=120,
+        step=1,
+    )
+    extremes_count = persistent_number_input(
+        "Количество экстремумов в таблице",
+        key=f"{prefix}_extremes_count",
+        default=5,
+        min_value=3,
+        max_value=20,
+        step=1,
+    )
+    norm_start, norm_end = date_period(
+        prefix=f"{prefix}_norm",
+        inherit_dashboard=False,
+        remember_dashboard=False,
+    )
     render_period_availability_notice(
         [station],
         [parameter],
@@ -275,15 +422,17 @@ def analysis_options(prefix: str = "analysis", station: Any = None, parameter: A
         norm_end,
         label="Период климатической нормы",
     )
-    return {
+    options = {
         "moving_average_window": int(window),
         "window": int(window),
         "extremes_count": int(extremes_count),
         "top_n": int(extremes_count),
         "seasonal_period": 12,
-        "norm_period_start": norm_start.isoformat(),
-        "norm_period_end": norm_end.isoformat(),
     }
+    if norm_start and norm_end:
+        options["norm_period_start"] = norm_start.isoformat()
+        options["norm_period_end"] = norm_end.isoformat()
+    return options
 
 
 def _parse_availability_date(value: Any) -> date | None:

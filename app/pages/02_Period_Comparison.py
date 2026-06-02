@@ -19,6 +19,8 @@ from app.components.filters import (
     load_parameters,
     load_stations,
     multiselect_stations,
+    persistent_selectbox,
+    persistent_text_input,
     render_period_availability_notice,
     select_aggregation,
     select_parameter,
@@ -26,7 +28,7 @@ from app.components.filters import (
 from app.components.layout import page_title, render_home_button, setup_page
 from app.components.sidebar import render_sidebar
 from app.components.tables import render_json_preview, render_table
-from app.state.session import init_session_state, require_auth
+from app.state.session import forget_form_value, init_session_state, require_auth
 from app.utils.formatters import station_id, station_label, unwrap_records
 from app.utils.validators import periods_overlap, validate_period
 
@@ -73,7 +75,7 @@ def _drop_period_state(index: int) -> None:
         f"period_compare_{index}_date_from",
         f"period_compare_{index}_date_to",
     ):
-        st.session_state.pop(key, None)
+        forget_form_value(key)
 
 
 def _period_label(index: int, name: str | None, date_from: Any, date_to: Any) -> str:
@@ -127,8 +129,12 @@ def _render_periods() -> list[dict[str, Any]]:
     periods = []
     for index in range(_period_count()):
         st.markdown(f"**Период {index + 1}**")
-        name = st.text_input("Название периода", value=f"Период {index + 1}", key=f"period_compare_name_{index}")
-        date_from, date_to = date_period(f"period_compare_{index}")
+        name = persistent_text_input("Название периода", key=f"period_compare_name_{index}", default=f"Период {index + 1}")
+        date_from, date_to = date_period(
+            f"period_compare_{index}",
+            inherit_dashboard=index == 0,
+            remember_dashboard=index == 0,
+        )
         periods.append(
             {
                 "index": index,
@@ -380,7 +386,12 @@ try:
 
     with st.sidebar:
         st.subheader("Настройки отображения")
-        metric = st.selectbox("Метрика графика", ["mean", "min", "max", "std", "sum"], key="period_comparison_metric")
+        metric = persistent_selectbox(
+            "Метрика графика",
+            ["mean", "min", "max", "std", "sum"],
+            key="period_comparison_metric",
+            default="mean",
+        )
         station_colors = _render_station_palette(stations, selected_station_ids)
 except ApiError as error:
     render_api_error(error)

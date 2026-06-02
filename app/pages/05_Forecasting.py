@@ -13,7 +13,7 @@ from app.api import forecasts
 from app.api.client import ApiError
 from app.components.charts import render_timeseries_chart
 from app.components.errors import render_api_error
-from app.components.filters import common_filters, validate_common_filters
+from app.components.filters import common_filters, persistent_number_input, persistent_selectbox, validate_common_filters
 from app.components.layout import page_title, render_home_button, setup_page
 from app.components.sidebar import render_sidebar
 from app.components.tables import render_json_preview, render_table
@@ -32,9 +32,19 @@ try:
     with st.container(border=True, key="forecast_parameters"):
         st.subheader("Параметры расчёта")
         filters = common_filters("forecast")
-        model = st.selectbox("Модель", ["linear_trend", "moving_average", "seasonal_naive"])
-        horizon = st.number_input("Горизонт", min_value=1, max_value=120, value=12, step=1)
-        horizon_unit = st.selectbox("Единица горизонта", ["days", "months", "years"], index=1)
+        model = persistent_selectbox(
+            "Модель",
+            ["linear_trend", "moving_average", "seasonal_naive"],
+            key="forecast_model",
+            default="linear_trend",
+        )
+        horizon = persistent_number_input("Горизонт", key="forecast_horizon", default=12, min_value=1, max_value=120, step=1)
+        horizon_unit = persistent_selectbox(
+            "Единица горизонта",
+            ["days", "months", "years"],
+            key="forecast_horizon_unit",
+            default="months",
+        )
         run_clicked = st.button("Запустить прогноз", type="primary", use_container_width=True)
 except ApiError as error:
     render_api_error(error)

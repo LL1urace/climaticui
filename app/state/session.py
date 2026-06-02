@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import streamlit as st
 
+
+PERSISTED_FORM_VALUES_KEY = "persisted_form_values"
 
 DEFAULT_KEYS = {
     "access_token": None,
@@ -23,6 +26,7 @@ DEFAULT_KEYS = {
     "dashboard_date_from": None,
     "dashboard_date_to": None,
     "dashboard_aggregation": "monthly",
+    "dashboard_filter_revision": 0,
     "dashboard_map_show_only_selected": False,
     "dashboard_map_classification_cache": {},
     "dashboard_map_classification_gradient": "climate",
@@ -33,6 +37,7 @@ DEFAULT_KEYS = {
     "report_include_graphs": True,
     "report_include_tables": True,
     "last_pdf_report_bytes": None,
+    PERSISTED_FORM_VALUES_KEY: {},
 }
 
 DASHBOARD_CONTEXT_DEFAULTS = {
@@ -48,6 +53,7 @@ DASHBOARD_CONTEXT_DEFAULTS = {
 
 DASHBOARD_CONTEXT_WIDGET_KEYS = {
     "dashboard_station_multiselect",
+    "dashboard_parameter",
     "dashboard_aggregation_select",
     "dashboard_period_date_from",
     "dashboard_period_date_to",
@@ -65,7 +71,7 @@ def init_session_state() -> None:
 
     for key, value in DEFAULT_KEYS.items():
         if key not in st.session_state:
-            st.session_state[key] = value
+            st.session_state[key] = deepcopy(value)
 
 
 def clear_dashboard_context() -> None:
@@ -76,12 +82,41 @@ def clear_dashboard_context() -> None:
     """
 
     init_session_state()
+    persisted_values = st.session_state.get(PERSISTED_FORM_VALUES_KEY) or {}
+    for key in persisted_values:
+        st.session_state.pop(key, None)
+    st.session_state[PERSISTED_FORM_VALUES_KEY] = {}
     for key in DASHBOARD_CONTEXT_WIDGET_KEYS:
         st.session_state.pop(key, None)
     for key in list(st.session_state):
-        if str(key).startswith("dashboard_stations_map_"):
+        if str(key).startswith(("dashboard_parameter_", "dashboard_stations_map_")):
             st.session_state.pop(key, None)
     st.session_state.update(DASHBOARD_CONTEXT_DEFAULTS)
+
+
+def persisted_form_value(key: str, default: object = None) -> object:
+    """Возвращает сохранённое значение формы, независимое от жизненного цикла виджета."""
+
+    init_session_state()
+    values = st.session_state.get(PERSISTED_FORM_VALUES_KEY) or {}
+    return values[key] if key in values else default
+
+
+def remember_form_value(key: str, value: object) -> None:
+    """Сохраняет значение формы между переходами по страницам Streamlit."""
+
+    init_session_state()
+    values = st.session_state.setdefault(PERSISTED_FORM_VALUES_KEY, {})
+    values[key] = value
+
+
+def forget_form_value(key: str) -> None:
+    """Удаляет сохранённое значение формы и связанное состояние виджета."""
+
+    init_session_state()
+    values = st.session_state.setdefault(PERSISTED_FORM_VALUES_KEY, {})
+    values.pop(key, None)
+    st.session_state.pop(key, None)
 
 
 def get_access_token() -> str | None:

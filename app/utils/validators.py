@@ -74,7 +74,12 @@ def validate_min_stations(station_ids: list[Any], min_count: int = 2) -> Validat
     return ValidationResult(True)
 
 
-def periods_overlap(first_start: date, first_end: date, second_start: date, second_end: date) -> bool:
+def periods_overlap(
+    first_start: date | None,
+    first_end: date | None,
+    second_start: date | None,
+    second_end: date | None,
+) -> bool:
     """Проверяет пересечение двух периодов дат.
 
     Args:
@@ -87,5 +92,7 @@ def periods_overlap(first_start: date, first_end: date, second_start: date, seco
         True, если периоды пересекаются.
     """
 
+    if not all((first_start, first_end, second_start, second_end)):
+        return False
     return max(first_start, second_start) <= min(first_end, second_end)
 
