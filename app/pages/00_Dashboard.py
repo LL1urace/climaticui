@@ -24,7 +24,14 @@ from app.components.filters import (
     select_aggregation,
 )
 from app.components.layout import page_title, setup_page
-from app.components.maps import BASEMAP_LABELS, EURASIA_MAP_VIEW, render_stations_map, station_map_palette
+from app.components.maps import (
+    BASEMAP_LABELS,
+    CLASSIFICATION_GRADIENT_LABELS,
+    EURASIA_MAP_VIEW,
+    classification_gradient_css,
+    render_stations_map,
+    station_map_palette,
+)
 from app.components.sidebar import render_sidebar
 from app.state.session import clear_dashboard_context, init_session_state, remember_selection, require_auth
 from app.utils.formatters import parameter_id, parameter_label, station_id, station_label, unwrap_records
@@ -310,6 +317,7 @@ def _map_selection_key(
     selected_station_ids: list[Any],
     show_only_selected: bool = False,
     classification_parameter: Any = None,
+    classification_gradient: str | None = None,
 ) -> str:
     """Формирует ключ карты, зависящий от текущего выбора станций.
 
@@ -317,6 +325,7 @@ def _map_selection_key(
         selected_station_ids: Текущий список выбранных метеостанций.
         show_only_selected: Скрыты ли невыбранные станции.
         classification_parameter: Параметр тематической раскраски или None.
+        classification_gradient: Палитра тематической раскраски или None.
 
     Returns:
         Уникальный ключ виджета карты для текущего состояния выбора.
@@ -324,7 +333,11 @@ def _map_selection_key(
 
     suffix = "_".join(_id_key(item_id) for item_id in selected_station_ids) or "empty"
     mode = "selected_only" if show_only_selected else "all"
-    classification = f"classified_{classification_parameter}" if classification_parameter is not None else "default"
+    classification = (
+        f"classified_{classification_parameter}_{classification_gradient}"
+        if classification_parameter is not None
+        else "default"
+    )
     return f"dashboard_stations_map_{mode}_{classification}_{suffix}"
 
 
@@ -496,13 +509,19 @@ def _classified_station_records(stations: list[dict], values: dict[str, float]) 
     ]
 
 
-def _render_map_classification_legend(parameter: dict, values: dict[str, float], stations_count: int) -> None:
+def _render_map_classification_legend(
+    parameter: dict,
+    values: dict[str, float],
+    stations_count: int,
+    gradient_name: str,
+) -> None:
     """Отображает легенду градиента тематической карты.
 
     Args:
         parameter: Запись климатического параметра.
         values: Средние значения по станциям.
         stations_count: Общее количество точек на карте.
+        gradient_name: Код выбранной цветовой палитры.
 
     Returns:
         None.
@@ -514,13 +533,14 @@ def _render_map_classification_legend(parameter: dict, values: dict[str, float],
     lower = min(values.values())
     upper = max(values.values())
     title = escape(parameter_label(parameter))
+    gradient_css = classification_gradient_css(gradient_name)
     st.markdown(
         f"""
         <div style="margin:.35rem 0 .55rem;padding:.85rem 1rem;border-radius:16px;
                     border:1px solid rgba(13,100,216,.16);background:rgba(255,255,255,.82);">
             <strong>Среднее за выбранный период: {title}</strong>
             <div style="height:.72rem;margin:.55rem 0 .28rem;border-radius:999px;
-                        background:linear-gradient(90deg,#0d64d8,#17b6d6,#76e4c5,#ffb020,#ea580c);"></div>
+                        background:linear-gradient(90deg,{gradient_css});"></div>
             <div style="display:flex;justify-content:space-between;color:#39536f;font-size:.82rem;">
                 <span>{lower:.2f}</span><span>{upper:.2f}</span>
             </div>
@@ -530,7 +550,7 @@ def _render_map_classification_legend(parameter: dict, values: dict[str, float],
     )
     st.caption(
         f"Классифицировано станций: {len(values)} из {stations_count}. "
-        "Выбранные станции остаются оранжевыми; точки без данных отображаются нейтральным цветом."
+        "Все станции с данными окрашены по градиенту; точки без данных отображаются нейтральным цветом."
     )
 
 
@@ -855,6 +875,13 @@ with st.sidebar:
         disabled=not map_classification_enabled,
         key="dashboard_map_classification_parameter",
     )
+    map_classification_gradient = st.selectbox(
+        "Цветовой градиент",
+        options=list(CLASSIFICATION_GRADIENT_LABELS),
+        format_func=lambda item: CLASSIFICATION_GRADIENT_LABELS[item],
+        disabled=not map_classification_enabled,
+        key="dashboard_map_classification_gradient",
+    )
     selected_station_color = st.color_picker(
         "Выбранные станции",
         value="#f59e0b",
@@ -878,7 +905,7 @@ with st.sidebar:
     )
     st.caption(
         "Классификация использует средние значения за выбранный период. "
-        "Цвет выбранной станции остаётся оранжевым."
+        "При её включении все станции окрашиваются по единому градиенту."
     )
 dashboard_map_palette = station_map_palette(
     selected_station_color,
@@ -889,7 +916,7 @@ dashboard_map_palette = station_map_palette(
 st.markdown(
     """
     <div class="klima-hero">
-        <span class="klima-kicker">Research control room</span>
+        <span class="klima-kicker">Исследовательский центр</span>
         <h1>Соберите климатический срез перед анализом</h1>
         <p>
             Исследовательская панель хранит общий контекст работы: выбранные станции, период и агрегацию.
@@ -987,8 +1014,14 @@ if map_classification_enabled:
                 "value_key": MAP_CLASSIFICATION_VALUE_KEY,
                 "min_value": min(classification_values.values()),
                 "max_value": max(classification_values.values()),
+                "gradient_name": map_classification_gradient,
             }
-            _render_map_classification_legend(classification_parameter, classification_values, len(stations))
+            _render_map_classification_legend(
+                classification_parameter,
+                classification_values,
+                len(stations),
+                map_classification_gradient,
+            )
         else:
             st.warning("Для выбранного параметра и периода нет значений для классификации карты.")
     else:
@@ -1004,6 +1037,7 @@ map_selected_station_ids = render_stations_map(
         selected_station_ids,
         show_only_selected_on_map,
         map_classification_parameter if map_classification else None,
+        map_classification_gradient if map_classification else None,
     ),
     selection_mode="multi-object",
     show_only_selected=show_only_selected_on_map,

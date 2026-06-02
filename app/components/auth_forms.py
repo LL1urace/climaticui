@@ -105,15 +105,18 @@ def _render_auth_styles() -> None:
     )
 
 
-def render_auth_tabs() -> None:
+def render_auth_tabs(default_tab: str | None = None) -> None:
     """Отображает вкладки входа и регистрации.
+
+    Args:
+        default_tab: Вкладка, которая должна быть открыта при первом рендере.
 
     Returns:
         None.
     """
 
     _render_auth_styles()
-    login_tab, register_tab = st.tabs(["Вход", "Регистрация"])
+    login_tab, register_tab = st.tabs(["Вход", "Регистрация"], default=default_tab)
     with login_tab:
         render_login_form()
     with register_tab:

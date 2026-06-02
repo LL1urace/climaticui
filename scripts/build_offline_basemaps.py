@@ -12,11 +12,12 @@ from PIL import Image
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 MAP_ASSETS_DIR = ROOT_DIR / "app" / "assets" / "maps"
+PUBLIC_MAP_ASSETS_DIR = ROOT_DIR / "app" / "static" / "maps"
 SATELLITE_SOURCE = MAP_ASSETS_DIR / "blue_marble_satellite.png"
 RELIEF_ARCHIVE = MAP_ASSETS_DIR / "NE1_50M_SR.zip"
 RELIEF_ARCHIVE_IMAGE = "NE1_50M_SR/NE1_50M_SR.tif"
-SATELLITE_OUTPUT = MAP_ASSETS_DIR / "blue_marble_satellite_mercator.jpg"
-RELIEF_OUTPUT = MAP_ASSETS_DIR / "natural_earth_relief_mercator.jpg"
+SATELLITE_OUTPUT = PUBLIC_MAP_ASSETS_DIR / "blue_marble_satellite_mercator.jpg"
+RELIEF_OUTPUT = PUBLIC_MAP_ASSETS_DIR / "natural_earth_relief_mercator.jpg"
 OUTPUT_SIZE = 2048
 
 
@@ -106,6 +107,7 @@ def build_offline_basemaps() -> None:
         FileNotFoundError: Если исходный PNG или архив Natural Earth отсутствует.
     """
 
+    PUBLIC_MAP_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     _save_web_mercator(Image.open(SATELLITE_SOURCE), SATELLITE_OUTPUT)
     with ZipFile(RELIEF_ARCHIVE) as archive:
         with archive.open(RELIEF_ARCHIVE_IMAGE) as relief_file:

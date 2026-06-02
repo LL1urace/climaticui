@@ -71,7 +71,7 @@ except ApiError as error:
 
 if not is_authenticated():
     st.subheader("Авторизация")
-    render_auth_tabs()
+    render_auth_tabs(default_tab=st.session_state.pop("auth_default_tab", None))
     st.stop()
 
 if st.session_state.get("current_user") is None:
@@ -437,7 +437,7 @@ with st.container(key="home-hero"):
         st.markdown(
             f"""
         <div class="klima-home-hero-copy">
-            <span class="klima-kicker">Climate intelligence workspace</span>
+            <span class="klima-kicker">Пространство климатической аналитики</span>
             <h1>Исследуйте климат <span>по данным метеостанций</span></h1>
             <p>
                 «КлиматикА» собирает в одном интерфейсе карту станций, временные ряды,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 
@@ -23,6 +25,7 @@ DEFAULT_KEYS = {
     "dashboard_aggregation": "monthly",
     "dashboard_map_show_only_selected": False,
     "dashboard_map_classification_cache": {},
+    "dashboard_map_classification_gradient": "climate",
     "dashboard_saved_set_mode": "dashboard",
     "last_saved_analysis_sets": [],
     "report_selected_sections": None,
@@ -153,74 +156,164 @@ def is_authenticated() -> bool:
     return bool(st.session_state.get("access_token") and st.session_state.get("is_authenticated"))
 
 
-from pathlib import Path
-
 def require_auth() -> None:
-    """Останавливает рендер страницы, если пользователь не авторизован."""
+    """Показывает экран повторного входа и останавливает защищённую страницу."""
 
     init_session_state()
     if is_authenticated():
         return
+
+    from app.components.auth_forms import render_login_form
 
     robot_image = Path(__file__).resolve().parents[1] / "assets" / "auth_robot.png"
 
     st.markdown(
         """
         <style>
-        h1 {
-            color: #062245 !important;
-            font-weight: 900 !important;
-            text-align: center !important;
+        .st-key-auth_guard_shell {
+            overflow: hidden;
+            margin: 2rem auto 0;
+            padding: 1.15rem !important;
+            border: 1px solid rgba(13, 100, 216, .18) !important;
+            border-radius: 30px !important;
+            background:
+                radial-gradient(circle at 8% 10%, rgba(118, 228, 197, .38), transparent 19rem),
+                radial-gradient(circle at 94% 92%, rgba(245, 158, 11, .30), transparent 18rem),
+                linear-gradient(135deg, rgba(7, 17, 31, .98), rgba(10, 43, 85, .97) 54%, rgba(13, 100, 216, .94)) !important;
+            box-shadow: 0 28px 72px rgba(7, 17, 31, .24) !important;
         }
 
-        .st-key-auth_guard_login button {
-            min-height: 3.4rem !important;
-            background: linear-gradient(135deg, #ffb020 0%, #f97316 55%, #ea580c 100%) !important;
-            border: 1px solid rgba(255, 255, 255, .78) !important;
-            box-shadow:
-                0 14px 30px rgba(234, 88, 12, .28),
-                0 0 0 4px rgba(249, 115, 22, .12) !important;
-            color: #ffffff !important;
-            font-weight: 900 !important;
-            font-size: 1.02rem !important;
+        .auth-guard-copy {
+            padding: .65rem 1.35rem 0;
         }
 
-        .st-key-auth_guard_login button * {
+        .auth-guard-kicker {
+            display: inline-flex;
+            padding: .35rem .72rem;
+            border: 1px solid rgba(159, 244, 223, .35);
+            border-radius: 999px;
+            background: rgba(118, 228, 197, .12);
+            color: #9ff4df;
+            font-size: .76rem;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+
+        .auth-guard-copy h1 {
+            max-width: 35rem;
+            margin: .8rem 0 .05rem;
+            color: #f97316 !important;
+            font-size: clamp(2rem, 3.5vw, 3.4rem);
+            line-height: .98;
+        }
+
+        .auth-guard-accent {
+            display: flex;
+            gap: .38rem;
+            margin-top: .85rem;
+        }
+
+        .auth-guard-accent span {
+            display: block;
+            width: 2.4rem;
+            height: .32rem;
+            border-radius: 999px;
+        }
+
+        .auth-guard-accent span:nth-child(1) {
+            background: #76e4c5;
+        }
+
+        .auth-guard-accent span:nth-child(2) {
+            background: #38bdf8;
+        }
+
+        .auth-guard-accent span:nth-child(3) {
+            background: #f59e0b;
+        }
+
+        .st-key-auth_guard_visual {
+            margin: -.65rem -3rem 0 0;
+            padding: .2rem 0 0;
+            border-radius: 26px;
+            background: radial-gradient(circle at 35% 52%, rgba(255, 255, 255, .14), transparent 52%);
+        }
+
+        .st-key-auth_guard_visual img {
+            filter: drop-shadow(0 22px 22px rgba(1, 8, 20, .26));
+        }
+
+        .st-key-auth_guard_shell div[data-testid="stForm"] {
+            padding: 1.25rem !important;
+            border: 1px solid rgba(255, 255, 255, .72) !important;
+            border-radius: 24px !important;
+            background:
+                radial-gradient(circle at 92% 6%, rgba(118, 228, 197, .38), transparent 10rem),
+                linear-gradient(145deg, rgba(255, 255, 255, .98), rgba(226, 242, 255, .96)) !important;
+            box-shadow: 0 24px 58px rgba(2, 9, 18, .28) !important;
+        }
+
+        .st-key-auth_guard_shell label,
+        .st-key-auth_guard_shell label p {
+            color: #12304f !important;
+            font-weight: 800 !important;
+        }
+
+        .st-key-auth_guard_shell input {
+            border: 1px solid rgba(13, 100, 216, .20) !important;
+            background: rgba(255, 255, 255, .92) !important;
+            color: #061326 !important;
+        }
+
+        .st-key-auth_guard_shell div[data-testid="stFormSubmitButton"] button {
+            border: 0 !important;
+            background: linear-gradient(135deg, #f59e0b, #fb7c17) !important;
             color: #ffffff !important;
-            font-weight: 900 !important;
+        }
+
+        .st-key-auth_guard_shell div[data-testid="stFormSubmitButton"] button * {
+            color: #ffffff !important;
+            font-weight: 800 !important;
+        }
+
+        .st-key-auth_guard_register button {
+            margin-top: .35rem;
+            border: 1px solid rgba(255, 255, 255, .72) !important;
+            background: rgba(255, 255, 255, .16) !important;
+            color: #ffffff !important;
+        }
+
+        .st-key-auth_guard_register button * {
+            color: #ffffff !important;
+            font-weight: 800 !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    st.write("")
-    st.write("")
-
-    img_left, img_center, img_right = st.columns([0.25, 0.5, 0.25])
-    with img_center:
-        if robot_image.exists():
-            st.image(str(robot_image), use_container_width=True)
-        else:
-            st.warning(f"Картинка не найдена: {robot_image}")
-
-    st.title("Войдите, чтобы открыть исследовательскую панель")
-
-    st.info(
-        "Эта страница доступна только авторизованным пользователям. "
-        "После входа вы сможете работать с картой станций, аналитикой, "
-        "историей запусков и отчётами."
-    )
-
-    st.caption("Робот-климатолог уже приготовил графики, но без входа показывать их стесняется.")
-
-    st.write("")
-    st.write("")
-
-    left, center, right = st.columns([0.32, 0.36, 0.32])
-    with center:
-        if st.button("🔑 Перейти ко входу", use_container_width=True, key="auth_guard_login"):
-            st.switch_page("main.py")
+    with st.container(border=True, key="auth_guard_shell"):
+        copy_column, login_column = st.columns([0.59, 0.41], vertical_alignment="center")
+        with copy_column:
+            st.markdown(
+                """
+                <div class="auth-guard-copy">
+                    <span class="auth-guard-kicker">Сессия завершена</span>
+                    <h1>Войдите снова</h1>
+                    <div class="auth-guard-accent"><span></span><span></span><span></span></div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if robot_image.exists():
+                with st.container(key="auth_guard_visual"):
+                    st.image(str(robot_image), width=550)
+        with login_column:
+            render_login_form()
+            if st.button("Создать аккаунт", use_container_width=True, key="auth_guard_register"):
+                st.session_state["auth_default_tab"] = "Регистрация"
+                st.switch_page("main.py")
 
     st.stop()
 

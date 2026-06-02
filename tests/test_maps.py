@@ -8,6 +8,7 @@ from app.components.maps import (
     ESRI_WORLD_IMAGERY_TILES,
     LOCAL_MAP_ASSETS_URL,
     _station_color,
+    classification_gradient_css,
     map_basemap_configuration,
     map_basemap_layers,
     map_view_for_points,
@@ -53,14 +54,27 @@ def test_station_classification_color_uses_gradient_and_neutral_fallback() -> No
     assert station_classification_color(None, 0, 10) == [100, 116, 139, 145]
 
 
-def test_station_color_preserves_selected_accent_during_classification() -> None:
-    """Проверяет приоритет выбранной станции над градиентом классификации."""
+def test_station_classification_color_supports_alternative_gradient() -> None:
+    """Проверяет выбор альтернативной палитры классификации."""
+
+    assert station_classification_color(0, 0, 10, gradient_name="forest") == [5, 150, 105, 210]
+    assert station_classification_color(10, 0, 10, gradient_name="forest") == [159, 18, 57, 210]
+    assert classification_gradient_css("forest").startswith("rgb(5,150,105)")
+
+
+def test_station_color_applies_gradient_to_selected_station_during_classification() -> None:
+    """Проверяет градиентную раскраску всех станций, включая выбранные."""
 
     palette = station_map_palette("#f59e0b", "#222222", "#333333")
-    classification = {"value_key": "classification_mean", "min_value": 0, "max_value": 10}
+    classification = {
+        "value_key": "classification_mean",
+        "min_value": 0,
+        "max_value": 10,
+        "gradient_name": "forest",
+    }
 
-    assert _station_color({"classification_mean": 0}, palette, classification) == [13, 100, 216, 210]
-    assert _station_color({"_selected": True, "classification_mean": 0}, palette, classification) == [245, 158, 11, 235]
+    assert _station_color({"classification_mean": 0}, palette, classification) == [5, 150, 105, 210]
+    assert _station_color({"_selected": True, "classification_mean": 0}, palette, classification) == [5, 150, 105, 210]
 
 
 def test_map_view_for_points_centers_single_station() -> None:

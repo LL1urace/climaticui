@@ -25,3 +25,5 @@ downloads
 poetry.lock
 QWEN.md
 CHANGELOG.md
+app/assets/maps/blue_marble_satellite.png
+app/assets/maps/NE1_50M_SR.zip

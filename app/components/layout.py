@@ -41,7 +41,20 @@ def apply_global_styles() -> None:
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
+        @font-face {
+            font-family: 'IBM Plex Sans';
+            src: url('/app/static/fonts/IBMPlexSans-Variable.ttf') format('truetype');
+            font-style: normal;
+            font-weight: 100 700;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: 'Manrope';
+            src: url('/app/static/fonts/Manrope-Variable.ttf') format('truetype');
+            font-style: normal;
+            font-weight: 200 800;
+            font-display: swap;
+        }
 
         :root {
             --klima-ink: #07111f;
@@ -88,7 +101,7 @@ def apply_global_styles() -> None:
         h1, h2, h3 {
             letter-spacing: -.035em;
             color: var(--klima-ink);
-            font-family: 'Manrope', 'IBM Plex Sans', sans-serif;
+            font-family: 'Manrope', 'IBM Plex Sans', sans-serif !important;
             font-weight: 800;
         }
         p, label, span, div {

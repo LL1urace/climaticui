@@ -20,13 +20,29 @@ SYNTHETIC_SAMPLE_COLOR = [6, 34, 69, 170]
 REFERENCE_DATA_COLOR = [74, 149, 255, 165]
 SELECTED_STATION_COLOR = [245, 158, 11, 235]
 CLASSIFICATION_MISSING_COLOR = [100, 116, 139, 145]
-CLASSIFICATION_GRADIENT_STOPS = [
-    [13, 100, 216],
-    [23, 182, 214],
-    [118, 228, 197],
-    [255, 176, 32],
-    [234, 88, 12],
-]
+CLASSIFICATION_GRADIENTS = {
+    "climate": {
+        "label": "Климатический: синий → бирюзовый → оранжевый",
+        "stops": [[13, 100, 216], [23, 182, 214], [118, 228, 197], [255, 176, 32], [234, 88, 12]],
+    },
+    "cool_warm": {
+        "label": "Контрастный: синий → светлый → красный",
+        "stops": [[37, 99, 235], [147, 197, 253], [241, 245, 249], [253, 186, 116], [220, 38, 38]],
+    },
+    "forest": {
+        "label": "Природный: зелёный → жёлтый → бордовый",
+        "stops": [[5, 150, 105], [110, 231, 183], [254, 240, 138], [251, 146, 60], [159, 18, 57]],
+    },
+    "violet": {
+        "label": "Спектральный: фиолетовый → голубой → розовый",
+        "stops": [[91, 33, 182], [59, 130, 246], [34, 211, 238], [244, 114, 182], [190, 24, 93]],
+    },
+}
+CLASSIFICATION_GRADIENT_LABELS = {
+    gradient_name: gradient["label"]
+    for gradient_name, gradient in CLASSIFICATION_GRADIENTS.items()
+}
+CLASSIFICATION_GRADIENT_STOPS = CLASSIFICATION_GRADIENTS["climate"]["stops"]
 STATION_POINT_RADIUS = 34000
 EURASIA_MAP_VIEW = {"latitude": 52.0, "longitude": 75.0, "zoom": 1.6, "pitch": 0, "bearing": 0}
 CARTO_VOYAGER_STYLE = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"
@@ -34,7 +50,7 @@ CARTO_POSITRON_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style
 CARTO_DARK_MATTER_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
 ESRI_WORLD_IMAGERY_TILES = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 ESRI_WORLD_TOPO_TILES = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
-LOCAL_MAP_ASSETS_URL = "http://localhost:8501/app/static/maps"
+LOCAL_MAP_ASSETS_URL = "/app/static/maps"
 OFFLINE_SATELLITE_IMAGE = f"{LOCAL_MAP_ASSETS_URL}/blue_marble_satellite_mercator.jpg"
 OFFLINE_RELIEF_IMAGE = f"{LOCAL_MAP_ASSETS_URL}/natural_earth_relief_mercator.jpg"
 BASEMAP_LABELS = {
@@ -157,7 +173,7 @@ def map_basemap_layers(basemap: str | None) -> list[pdk.Layer]:
         pdk.Layer(
             "BitmapLayer",
             id=f"{basemap}-bitmap-layer",
-            image=image_url,
+            image=f'"{image_url}"',
             bounds=[-180, -85.051129, 180, 85.051129],
             opacity=1.0,
             pickable=False,
@@ -216,7 +232,20 @@ def _has_real_station_data(record: dict) -> bool:
     return bool(record.get("has_real_monthly_data"))
 
 
-def station_classification_color(value: Any, min_value: Any, max_value: Any, alpha: int = 210) -> list[int]:
+def classification_gradient_css(gradient_name: str | None = None) -> str:
+    """Возвращает CSS-цвета выбранного градиента карты."""
+
+    gradient = CLASSIFICATION_GRADIENTS.get(gradient_name or "climate", CLASSIFICATION_GRADIENTS["climate"])
+    return ",".join(f"rgb({red},{green},{blue})" for red, green, blue in gradient["stops"])
+
+
+def station_classification_color(
+    value: Any,
+    min_value: Any,
+    max_value: Any,
+    alpha: int = 210,
+    gradient_name: str | None = None,
+) -> list[int]:
     """Возвращает RGBA-цвет значения на градиенте классификации карты.
 
     Args:
@@ -224,6 +253,7 @@ def station_classification_color(value: Any, min_value: Any, max_value: Any, alp
         min_value: Минимум среди классифицированных станций.
         max_value: Максимум среди классифицированных станций.
         alpha: Прозрачность точки от 0 до 255.
+        gradient_name: Код цветовой палитры классификации.
 
     Returns:
         Интерполированный цвет или нейтральный цвет для отсутствующего значения.
@@ -239,12 +269,14 @@ def station_classification_color(value: Any, min_value: Any, max_value: Any, alp
         return CLASSIFICATION_MISSING_COLOR
 
     ratio = 0.5 if upper <= lower else max(0.0, min(1.0, (number - lower) / (upper - lower)))
-    scaled = ratio * (len(CLASSIFICATION_GRADIENT_STOPS) - 1)
-    start_index = min(int(math.floor(scaled)), len(CLASSIFICATION_GRADIENT_STOPS) - 1)
-    end_index = min(start_index + 1, len(CLASSIFICATION_GRADIENT_STOPS) - 1)
+    gradient = CLASSIFICATION_GRADIENTS.get(gradient_name or "climate", CLASSIFICATION_GRADIENTS["climate"])
+    stops = gradient["stops"]
+    scaled = ratio * (len(stops) - 1)
+    start_index = min(int(math.floor(scaled)), len(stops) - 1)
+    end_index = min(start_index + 1, len(stops) - 1)
     fraction = scaled - start_index
-    start = CLASSIFICATION_GRADIENT_STOPS[start_index]
-    end = CLASSIFICATION_GRADIENT_STOPS[end_index]
+    start = stops[start_index]
+    end = stops[end_index]
     return [round(start[channel] + (end[channel] - start[channel]) * fraction) for channel in range(3)] + [alpha]
 
 
@@ -265,14 +297,15 @@ def _station_color(
     """
 
     palette = color_map or {}
-    if record.get("_selected"):
-        return palette.get("selected", SELECTED_STATION_COLOR)
     if classification and classification.get("value_key"):
         return station_classification_color(
             record.get(classification["value_key"]),
             classification.get("min_value"),
             classification.get("max_value"),
+            gradient_name=classification.get("gradient_name"),
         )
+    if record.get("_selected"):
+        return palette.get("selected", SELECTED_STATION_COLOR)
     if _has_real_station_data(record):
         return palette.get("real", REFERENCE_DATA_COLOR)
     return palette.get("synthetic", SYNTHETIC_SAMPLE_COLOR)
