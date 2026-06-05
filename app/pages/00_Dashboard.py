@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from html import escape
 import math
 import sys
@@ -23,7 +24,6 @@ from app.components.filters import (
     persistent_selectbox,
     render_station_period_availability_notice,
     select_aggregation,
-    select_parameter,
 )
 from app.components.layout import page_title, setup_page
 from app.components.maps import (
@@ -34,8 +34,15 @@ from app.components.maps import (
     render_stations_map,
     station_map_palette,
 )
+from app.components.saved_set_modes import SAVE_SET_MODE_ORDER, format_modes, mode_label, normalize_saved_set_modes
 from app.components.sidebar import render_sidebar
-from app.state.session import clear_dashboard_context, init_session_state, remember_selection, require_auth
+from app.state.session import (
+    PERSISTED_FORM_VALUES_KEY,
+    clear_dashboard_context,
+    init_session_state,
+    remember_selection,
+    require_auth,
+)
 from app.utils.formatters import parameter_id, parameter_label, station_id, station_label, unwrap_records
 
 
@@ -125,12 +132,45 @@ TOP_NAVIGATION = [
     {"label": "Отчёты", "path": "pages/07_Reports.py", "key": "reports"},
 ]
 
-SAVE_SET_MODES = {
-    "dashboard": "Дашборд",
-    "analysis": "Анализ",
-    "forecast": "Прогнозирование",
-    "report": "Отчёт",
+SNAPSHOT_KEY_PREFIXES = (
+    "dashboard_",
+    "analysis_",
+    "period_comparison_",
+    "period_compare_",
+    "period_station_color_",
+    "compare_",
+    "station_comparison_",
+    "climatogram_",
+    "forecast_",
+    "correlation_",
+    "report_",
+)
+SNAPSHOT_KEYS = {"selected_station_id", "selected_parameter_id", "chart_active_scope"}
+SNAPSHOT_EXCLUDED_KEYS = {
+    "dashboard_filter_revision",
+    "dashboard_map_classification_cache",
+    "dashboard_map_pending_station_ids",
+    "dashboard_ignore_next_map_selection",
+    "dashboard_reset_pending",
+    "dashboard_reset_notice",
+    "dashboard_restored_saved_set_notice",
 }
+SNAPSHOT_EXCLUDED_PREFIXES = ("dashboard_stations_map_",)
+DASHBOARD_SAVE_SET_MODE_OPTIONS = tuple(mode for mode in SAVE_SET_MODE_ORDER if mode != "report")
+DASHBOARD_PARAMETER_CONTEXT_KEYS = (
+    "dashboard_parameter",
+    "dashboard_parameter_ids",
+    "selected_parameter_id",
+    "analysis_parameter",
+    "forecast_parameter",
+    "period_comparison_parameter",
+    "compare_station_parameter",
+    "climatogram_temp",
+    "climatogram_precip",
+    "correlation_parameters",
+)
+DASHBOARD_PARAMETER_CONTEXT_PREFIXES = ("dashboard_parameter_", "dashboard_parameters_")
+DASHBOARD_PARAMETER_IGNORED_SUFFIXES = ("_clear",)
 MAP_CLASSIFICATION_VALUE_KEY = "_classification_mean"
 
 
@@ -161,6 +201,7 @@ def _apply_pending_dashboard_reset() -> None:
     clear_dashboard_context()
     st.session_state["dashboard_filter_revision"] += 1
     st.session_state["dashboard_station_multiselect"] = []
+    st.session_state["dashboard_parameter_ids"] = []
     st.session_state["dashboard_aggregation_select"] = "monthly"
     st.session_state["dashboard_period_date_from"] = None
     st.session_state["dashboard_period_date_to"] = None
@@ -380,7 +421,7 @@ def _next_station_selection(current_ids: list[Any], map_ids: list[Any] | None) -
 
 def _remember_dashboard_filters(
     selected_station_ids: list[Any],
-    selected_parameter: Any,
+    selected_parameter_ids: list[Any],
     date_from: Any,
     date_to: Any,
     aggregation: str,
@@ -389,7 +430,7 @@ def _remember_dashboard_filters(
 
     Args:
         selected_station_ids: Идентификаторы выбранных станций.
-        selected_parameter: Основной климатический параметр.
+        selected_parameter_ids: Выбранные климатические параметры.
         date_from: Начальная дата общего периода.
         date_to: Конечная дата общего периода.
         aggregation: Код выбранной агрегации.
@@ -398,14 +439,92 @@ def _remember_dashboard_filters(
         None.
     """
 
+    primary_parameter = selected_parameter_ids[0] if selected_parameter_ids else None
     st.session_state["dashboard_station_ids"] = selected_station_ids
-    st.session_state["selected_parameter_id"] = selected_parameter
+    st.session_state["dashboard_parameter_ids"] = selected_parameter_ids
+    st.session_state["selected_parameter_id"] = primary_parameter
     st.session_state["dashboard_date_from"] = date_from
     st.session_state["dashboard_date_to"] = date_to
     st.session_state["dashboard_aggregation"] = aggregation
-    remember_selection(station_id=selected_station_ids[0] if selected_station_ids else None)
+    remember_selection(station_id=selected_station_ids[0] if selected_station_ids else None, parameter_id=primary_parameter)
     if not selected_station_ids:
         st.session_state["selected_station_id"] = None
+
+
+def _normalize_parameter_selection(value: Any, available_ids: list[Any]) -> list[Any]:
+    """Normalizes one or many parameter ids against the loaded dictionary."""
+
+    values = value if isinstance(value, list) else [value]
+    available_by_text = {str(item): item for item in available_ids}
+    selected = []
+    seen = set()
+    for item in values:
+        if item in (None, ""):
+            continue
+        normalized = available_by_text.get(str(item))
+        if normalized is None or str(normalized) in seen:
+            continue
+        selected.append(normalized)
+        seen.add(str(normalized))
+    return selected
+
+
+def _context_parameter_ids(available_ids: list[Any]) -> list[Any]:
+    """Collects parameter ids already selected on the dashboard and other pages."""
+
+    selected: list[Any] = []
+    seen = set()
+
+    def append(value: Any) -> None:
+        for item in _normalize_parameter_selection(value, available_ids):
+            marker = str(item)
+            if marker not in seen:
+                selected.append(item)
+                seen.add(marker)
+
+    for key in DASHBOARD_PARAMETER_CONTEXT_KEYS:
+        append(st.session_state.get(key))
+    for key, value in dict(st.session_state).items():
+        key_text = str(key)
+        if key_text.endswith(DASHBOARD_PARAMETER_IGNORED_SUFFIXES):
+            continue
+        if key_text.startswith(DASHBOARD_PARAMETER_CONTEXT_PREFIXES):
+            append(value)
+    return selected
+
+
+def _dashboard_parameter_multiselect(parameters: list[dict], key: str) -> list[Any]:
+    """Renders dashboard parameter multiselect with a clear action."""
+
+    if not parameters:
+        st.warning("Backend не вернул список параметров.")
+        return []
+
+    options = [parameter_id(parameter) for parameter in parameters if parameter_id(parameter) is not None]
+    by_id = {parameter_id(parameter): parameter for parameter in parameters if parameter_id(parameter) is not None}
+    default_selection = _context_parameter_ids(options)
+    multiselect_options = {
+        "label": "Параметры",
+        "options": options,
+        "key": key,
+        "format_func": lambda item_id: parameter_label(by_id[item_id]),
+        "placeholder": "Выберите один или несколько параметров",
+    }
+    if key not in st.session_state:
+        multiselect_options["default"] = default_selection
+    selected = st.multiselect(**multiselect_options)
+    selected = _normalize_parameter_selection(selected, options)
+
+    if st.button("Очистить", key=f"{key}_clear", use_container_width=True):
+        st.session_state[key] = []
+        st.session_state["dashboard_parameter_ids"] = []
+        st.session_state["selected_parameter_id"] = None
+        st.rerun()
+
+    st.session_state["dashboard_parameter_ids"] = selected
+    st.session_state["selected_parameter_id"] = selected[0] if selected else None
+    st.caption(f"Выбрано параметров: {len(selected)}.")
+    return selected
 
 
 def _map_classification_signature(
@@ -565,28 +684,112 @@ def _render_map_classification_legend(
     )
 
 
-def _saved_set_payloads(
+def _json_safe_value(value: Any) -> Any:
+    """Converts Streamlit state values to JSON-compatible saved-set fields."""
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    return str(value)
+
+
+def _is_snapshot_key(key: Any) -> bool:
+    """Checks whether a session key belongs to user-facing analysis parameters."""
+
+    key_text = str(key)
+    if key_text in SNAPSHOT_EXCLUDED_KEYS or key_text.startswith(SNAPSHOT_EXCLUDED_PREFIXES):
+        return False
+    return key_text in SNAPSHOT_KEYS or key_text.startswith(SNAPSHOT_KEY_PREFIXES)
+
+
+def _current_saved_set_modes() -> list[str]:
+    """Returns selected saved-set scenarios with a dashboard fallback."""
+
+    modes = normalize_saved_set_modes(
+        st.session_state.get("dashboard_saved_set_modes"),
+        fallback=st.session_state.get("dashboard_saved_set_mode") or "dashboard",
+    )
+    return [mode for mode in modes if mode in DASHBOARD_SAVE_SET_MODE_OPTIONS] or ["dashboard"]
+
+
+def _session_parameter_snapshot(
     selected_station_ids: list[Any],
-    parameters: list[dict],
+    selected_parameter_ids: list[Any],
     date_from: Any,
     date_to: Any,
-    mode: str,
+    aggregation: str,
+    modes: list[str],
+) -> dict[str, Any]:
+    """Builds a compact snapshot of the current cross-page parameter state."""
+
+    snapshot: dict[str, Any] = {}
+    persisted_values = st.session_state.get(PERSISTED_FORM_VALUES_KEY) or {}
+    for source in (persisted_values, st.session_state):
+        for key, value in dict(source).items():
+            if _is_snapshot_key(key):
+                snapshot[str(key)] = _json_safe_value(value)
+
+    primary_station = selected_station_ids[0] if selected_station_ids else None
+    primary_parameter = selected_parameter_ids[0] if selected_parameter_ids else None
+    snapshot.update(
+        {
+            "dashboard_station_ids": _json_safe_value(selected_station_ids),
+            "dashboard_station_multiselect": _json_safe_value(selected_station_ids),
+            "selected_station_id": _json_safe_value(primary_station),
+            "selected_parameter_id": _json_safe_value(primary_parameter),
+            "dashboard_date_from": _json_safe_value(date_from),
+            "dashboard_date_to": _json_safe_value(date_to),
+            "dashboard_period_date_from": _json_safe_value(date_from),
+            "dashboard_period_date_to": _json_safe_value(date_to),
+            "dashboard_aggregation": aggregation,
+            "dashboard_aggregation_select": aggregation,
+            "dashboard_saved_set_mode": modes[0] if modes else "dashboard",
+            "dashboard_saved_set_modes": _json_safe_value(modes),
+        }
+    )
+    return snapshot
+
+
+def _saved_set_payloads(
+    selected_station_ids: list[Any],
+    selected_parameter_ids: list[Any],
+    date_from: Any,
+    date_to: Any,
+    aggregation: str,
+    modes: list[str],
 ) -> list[dict[str, Any]]:
     """Формирует payload сохранённых наборов анализа.
 
     Args:
         selected_station_ids: Выбранные метеостанции.
-        parameters: Все климатические показатели из справочника.
+        selected_parameter_ids: Выбранные климатические показатели.
         date_from: Начальная дата периода.
         date_to: Конечная дата периода.
-        mode: Режим работы набора.
+        aggregation: Тип агрегации временного ряда.
+        modes: Сценарии, для которых сохраняется набор.
 
     Returns:
         Список payload по одной записи на каждую станцию.
     """
 
-    selected_parameter_ids = [parameter_id(parameter) for parameter in parameters if parameter_id(parameter) is not None]
+    selected_parameter_ids = [item for item in selected_parameter_ids if item is not None]
     parameter = selected_parameter_ids[0] if selected_parameter_ids else None
+    normalized_modes = normalize_saved_set_modes(modes, fallback="dashboard") or ["dashboard"]
+    session_snapshot = _session_parameter_snapshot(
+        selected_station_ids,
+        selected_parameter_ids,
+        date_from,
+        date_to,
+        aggregation,
+        normalized_modes,
+    )
     return [
         {
             "station_id": current_station_id,
@@ -594,7 +797,11 @@ def _saved_set_payloads(
             "selected_parameters": selected_parameter_ids,
             "period_start": date_from.isoformat(),
             "period_end": date_to.isoformat(),
-            "mode": mode,
+            "aggregation": aggregation,
+            "mode": normalized_modes[0],
+            "modes": normalized_modes,
+            "scenarios": normalized_modes,
+            "session_snapshot": session_snapshot,
         }
         for current_station_id in selected_station_ids
     ]
@@ -602,17 +809,19 @@ def _saved_set_payloads(
 
 def _render_saved_set_block(
     selected_station_ids: list[Any],
-    parameters: list[dict],
+    selected_parameter_ids: list[Any],
     date_from: Any,
     date_to: Any,
+    aggregation: str,
 ) -> None:
     """Отображает форму сохранения текущего аналитического набора.
 
     Args:
         selected_station_ids: Выбранные метеостанции.
-        parameters: Список климатических параметров.
+        selected_parameter_ids: Список выбранных климатических параметров.
         date_from: Начальная дата периода.
         date_to: Конечная дата периода.
+        aggregation: Тип агрегации временного ряда.
 
     Returns:
         None.
@@ -621,25 +830,39 @@ def _render_saved_set_block(
     st.subheader("Сохранение набора анализа")
     st.caption(
         "Будет создана отдельная запись для каждой выбранной станции. "
-        "Все климатические показатели сохраняются автоматически в selected_parameters, "
-        "а в parameter_id записывается первый показатель из справочника для совместимости с backend-моделью."
+        "Выбранные климатические показатели, сценарии и параметры страниц сохраняются вместе со снимком набора. "
+        "В parameter_id дополнительно записывается первый показатель из справочника для совместимости с backend-моделью."
     )
     with st.container(border=True, key="dashboard_saved_set_parameters"):
-        mode = st.selectbox(
-            "Режим набора",
-            options=list(SAVE_SET_MODES),
-            format_func=lambda item: SAVE_SET_MODES[item],
-            key="dashboard_saved_set_mode",
+        mode_widget_options = {
+            "label": "Сценарии набора",
+            "options": list(DASHBOARD_SAVE_SET_MODE_OPTIONS),
+            "format_func": mode_label,
+            "key": "dashboard_saved_set_modes",
+            "help": "Отметьте все страницы, для которых этот набор должен считаться актуальным.",
+        }
+        st.session_state["dashboard_saved_set_modes"] = _current_saved_set_modes()
+        if "dashboard_saved_set_modes" not in st.session_state:
+            mode_widget_options["default"] = _current_saved_set_modes()
+        modes = st.multiselect(**mode_widget_options)
+        if not modes:
+            st.warning("Выберите хотя бы один сценарий. По умолчанию набор относится к исследовательской панели.")
+        normalized_modes = normalize_saved_set_modes(modes, fallback="dashboard") or ["dashboard"]
+        st.session_state["dashboard_saved_set_mode"] = normalized_modes[0]
+        st.caption(
+            "Сценарии: "
+            + ", ".join(mode_label(mode) for mode in normalized_modes)
         )
-        parameter_count = len([parameter for parameter in parameters if parameter_id(parameter) is not None])
+        parameter_count = len(selected_parameter_ids)
         st.caption(f"В набор будет включено климатических показателей: {parameter_count}.")
+        st.caption(f"Агрегация сохранится вместе с набором: `{aggregation}`.")
 
         can_save = bool(selected_station_ids and parameter_count and date_from and date_to)
         if not can_save:
-            st.info("Чтобы сохранить набор, выберите станции и период. Список климатических показателей берётся автоматически.")
+            st.info("Чтобы сохранить набор, выберите станции, параметры и период.")
 
         if st.button("Сохранить набор анализа", type="primary", use_container_width=True, disabled=not can_save):
-            payloads = _saved_set_payloads(selected_station_ids, parameters, date_from, date_to, mode)
+            payloads = _saved_set_payloads(selected_station_ids, selected_parameter_ids, date_from, date_to, aggregation, normalized_modes)
             saved_records = []
             errors = []
             for payload in payloads:
@@ -663,7 +886,7 @@ def _render_saved_set_block(
                         "Параметр": record.get("parameter_id"),
                         "Показатели": ", ".join(str(item) for item in record.get("selected_parameters") or []),
                         "Период": f"{record.get('period_start')} - {record.get('period_end')}",
-                        "Режим": record.get("mode"),
+                        "Сценарии": format_modes(record),
                         "Создан": record.get("created_at"),
                     }
                     for record in saved_records
@@ -974,25 +1197,27 @@ with st.container(border=True, key="dashboard_global_filters"):
 
     if st.session_state.pop("dashboard_reset_notice", False):
         st.success("Данные панели сброшены. Можно собрать новый аналитический срез.")
+    if st.session_state.pop("dashboard_restored_saved_set_notice", False):
+        st.success("Параметры восстановлены из истории сохранённых наборов.")
 
     filter_cols = st.columns([0.44, 0.32, 0.24])
     with filter_cols[0]:
         selected_station_ids = multiselect_stations(stations, key="dashboard_station_multiselect", default_ids=default_station_ids)
     with filter_cols[1]:
-        parameter_widget_key = f"dashboard_parameter_{st.session_state['dashboard_filter_revision']}"
-        selected_parameter = select_parameter(parameters, key=parameter_widget_key)
+        parameter_widget_key = f"dashboard_parameters_{st.session_state['dashboard_filter_revision']}"
+        selected_parameter_ids = _dashboard_parameter_multiselect(parameters, key=parameter_widget_key)
     with filter_cols[2]:
         aggregation = select_aggregation("dashboard_aggregation_select")
 
     date_from, date_to = date_period("dashboard_period")
     selected_stations = _selected_station_records(stations, selected_station_ids)
 
-    _remember_dashboard_filters(selected_station_ids, selected_parameter, date_from, date_to, aggregation)
+    _remember_dashboard_filters(selected_station_ids, selected_parameter_ids, date_from, date_to, aggregation)
     render_station_period_availability_notice(
         selected_stations,
         date_from,
         date_to,
-        [selected_parameter] if selected_parameter is not None else [],
+        selected_parameter_ids,
     )
     _render_slice_summary(selected_stations, date_from, date_to, aggregation)
 
@@ -1134,4 +1359,4 @@ for row in feature_rows:
         with column:
             _render_feature_card(feature)
 
-_render_saved_set_block(selected_station_ids, parameters, date_from, date_to)
+_render_saved_set_block(selected_station_ids, selected_parameter_ids, date_from, date_to, aggregation)

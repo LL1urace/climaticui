@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from app.components.chart_settings import get_chart_style
 from app.utils.formatters import series_dataframe, unwrap_records
 
 
@@ -259,6 +260,82 @@ def _closed_month_trace(trace: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([trace, trace.iloc[[0]]], ignore_index=True)
 
 
+def _style_palette(style: dict[str, Any] | None = None) -> list[str]:
+    """Возвращает палитру с выбранными в sidebar цветами в начале."""
+
+    style = style or get_chart_style()
+    preferred = [
+        str(style.get("chart_primary_color") or DEFAULT_CHART_COLOR),
+        str(style.get("chart_accent_color") or "#f59e0b"),
+        str(style.get("chart_bar_color") or "#17b6d6"),
+        str(style.get("chart_negative_color") or "#07111f"),
+    ]
+    palette = []
+    for color in [*preferred, *CHART_PALETTE]:
+        if color and color not in palette:
+            palette.append(color)
+    return palette
+
+
+def _series_dash(index: int = 0, style: dict[str, Any] | None = None) -> str:
+    """Возвращает тип штриха линии по глобальным настройкам графиков."""
+
+    style = style or get_chart_style()
+    base_dash = str(style.get("chart_line_dash") or "solid")
+    if not style.get("chart_vary_series_dashes") or index <= 0:
+        return base_dash
+    dash_sequence = [base_dash, *[dash for dash in LINE_DASHES if dash != base_dash]]
+    return dash_sequence[index % len(dash_sequence)]
+
+
+def _line_mode(style: dict[str, Any] | None = None) -> str:
+    """Возвращает Plotly-режим линии с учётом показа маркеров."""
+
+    style = style or get_chart_style()
+    return "lines+markers" if style.get("chart_show_markers") else "lines"
+
+
+def _line_style(
+    color: str | None = None,
+    index: int = 0,
+    style: dict[str, Any] | None = None,
+    dash: str | None = None,
+) -> dict[str, Any]:
+    """Формирует стиль линии Plotly по настройкам sidebar."""
+
+    style = style or get_chart_style()
+    palette = _style_palette(style)
+    return {
+        "color": color or palette[index % len(palette)],
+        "dash": dash or _series_dash(index, style),
+        "width": float(style.get("chart_line_width") or 3.0),
+    }
+
+
+def _marker_style(color: str | None = None, style: dict[str, Any] | None = None, size: int | None = None) -> dict[str, Any]:
+    """Формирует стиль маркера Plotly по настройкам sidebar."""
+
+    style = style or get_chart_style()
+    return {
+        "color": color or str(style.get("chart_primary_color") or DEFAULT_CHART_COLOR),
+        "size": size or int(style.get("chart_marker_size") or 7),
+    }
+
+
+def _bar_opacity(style: dict[str, Any] | None = None, fallback: float | None = None) -> float:
+    """Возвращает настроенную прозрачность столбцов."""
+
+    style = style or get_chart_style()
+    return float(style.get("chart_bar_opacity") or fallback or 0.72)
+
+
+def _apply_chart_layout(fig: go.Figure, style: dict[str, Any] | None = None, **layout: Any) -> None:
+    """Применяет общие настройки layout для Plotly-графика."""
+
+    style = style or get_chart_style()
+    fig.update_layout(template=style.get("chart_template") or "plotly_white", **layout)
+
+
 def render_timeseries_chart(payload: Any, title: str = "Временной ряд", value_label: str = "Значение") -> None:
     """Отображает линейный график временного ряда.
 
@@ -276,9 +353,20 @@ def render_timeseries_chart(payload: Any, title: str = "Временной ря�
         st.info("Временной ряд отсутствует в ответе backend.")
         return
 
+    style = get_chart_style()
+    color = str(style.get("chart_primary_color") or DEFAULT_CHART_COLOR)
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["date"], y=df["value"], name=value_label, mode="lines+markers"))
-    fig.update_layout(title=title, xaxis_title="Дата", yaxis_title=value_label, hovermode="x unified", height=440)
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=df["value"],
+            name=value_label,
+            mode=_line_mode(style),
+            line=_line_style(color, style=style),
+            marker=_marker_style(color, style),
+        )
+    )
+    _apply_chart_layout(fig, style, title=title, xaxis_title="Дата", yaxis_title=value_label, hovermode="x unified", height=440)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -300,26 +388,27 @@ def render_multi_timeseries_chart(
         None.
     """
 
+    style = get_chart_style()
+    palette = _style_palette(style)
     fig = go.Figure()
     has_data = False
 
-    for item in series_payloads:
+    for index, item in enumerate(series_payloads):
         station_key = item.get("station_id") or item.get("id") or item.get("label")
         label = str(item.get("label") or station_key or "Станция")
         df = series_dataframe(item.get("series") or item.get("timeseries") or item.get("values") or item)
         if df.empty or not {"date", "value"}.issubset(df.columns):
             continue
 
-        color = _color_for_key(color_map, station_key)
+        color = _color_for_key(color_map, station_key) or palette[index % len(palette)]
         trace_kwargs: dict[str, Any] = {
             "x": df["date"],
             "y": df["value"],
             "name": label,
-            "mode": "lines+markers",
+            "mode": _line_mode(style),
+            "line": _line_style(color, index, style),
+            "marker": _marker_style(color, style),
         }
-        if color:
-            trace_kwargs["line"] = {"color": color}
-            trace_kwargs["marker"] = {"color": color}
         fig.add_trace(go.Scatter(**trace_kwargs))
         has_data = True
 
@@ -327,7 +416,7 @@ def render_multi_timeseries_chart(
         st.info("Временные ряды для выбранных станций отсутствуют.")
         return
 
-    fig.update_layout(title=title, xaxis_title="Дата", yaxis_title=value_label, hovermode="x unified", height=460)
+    _apply_chart_layout(fig, style, title=title, xaxis_title="Дата", yaxis_title=value_label, hovermode="x unified", height=460)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -344,25 +433,47 @@ def render_overlay_chart(series_payload: Any, overlays: dict[str, Any], title: s
     """
 
     base_df = series_dataframe(series_payload)
+    style = get_chart_style()
+    palette = _style_palette(style)
     fig = go.Figure()
     has_data = False
 
     if not base_df.empty and {"date", "value"}.issubset(base_df.columns):
-        fig.add_trace(go.Scatter(x=base_df["date"], y=base_df["value"], name="Исходный ряд", mode="lines"))
+        base_color = palette[0]
+        fig.add_trace(
+            go.Scatter(
+                x=base_df["date"],
+                y=base_df["value"],
+                name="Исходный ряд",
+                mode=_line_mode(style),
+                line=_line_style(base_color, 0, style),
+                marker=_marker_style(base_color, style),
+            )
+        )
         has_data = True
 
-    for name, payload in overlays.items():
+    for index, (name, payload) in enumerate(overlays.items(), start=1):
         df = series_dataframe(payload)
         if df.empty or not {"date", "value"}.issubset(df.columns):
             continue
-        fig.add_trace(go.Scatter(x=df["date"], y=df["value"], name=name, mode="lines"))
+        color = palette[index % len(palette)]
+        fig.add_trace(
+            go.Scatter(
+                x=df["date"],
+                y=df["value"],
+                name=name,
+                mode=_line_mode(style),
+                line=_line_style(color, index, style),
+                marker=_marker_style(color, style),
+            )
+        )
         has_data = True
 
     if not has_data:
         st.info("Данные для графика отсутствуют.")
         return
 
-    fig.update_layout(title=title, xaxis_title="Дата", yaxis_title="Значение", hovermode="x unified", height=480)
+    _apply_chart_layout(fig, style, title=title, xaxis_title="Дата", yaxis_title="Значение", hovermode="x unified", height=480)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -409,11 +520,14 @@ def render_anomaly_chart(series_payload: Any, anomalies_payload: Any, title: str
         st.info("Аномалии отсутствуют в результате анализа.")
         return
 
-    colors = ["#0d64d8" if value >= 0 else "#07111f" for value in df["value"]]
+    style = get_chart_style()
+    positive_color = str(style.get("chart_primary_color") or DEFAULT_CHART_COLOR)
+    negative_color = str(style.get("chart_negative_color") or "#07111f")
+    colors = [positive_color if value >= 0 else negative_color for value in df["value"]]
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=df["date"], y=df["value"], name="Аномалия", marker_color=colors, opacity=0.82))
-    fig.add_hline(y=0, line_dash="dash", line_color="#64748b")
-    fig.update_layout(title=title, xaxis_title="Дата", yaxis_title="Отклонение", hovermode="x unified", height=430)
+    fig.add_trace(go.Bar(x=df["date"], y=df["value"], name="Аномалия", marker_color=colors, opacity=_bar_opacity(style, 0.82)))
+    fig.add_hline(y=0, line_dash=_series_dash(1, style), line_color=str(style.get("chart_accent_color") or "#64748b"))
+    _apply_chart_layout(fig, style, title=title, xaxis_title="Дата", yaxis_title="Отклонение", hovermode="x unified", height=430)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -438,6 +552,8 @@ def render_decomposition_chart(payload: Any, title: str = "Сезонная де
         "seasonal": "Сезонная компонента",
         "residual": "Остаточная компонента",
     }
+    style = get_chart_style()
+    palette = _style_palette(style)
     fig = go.Figure()
     has_data = False
     for index, (component_key, component_label) in enumerate(component_labels.items()):
@@ -449,8 +565,9 @@ def render_decomposition_chart(payload: Any, title: str = "Сезонная де
                 x=df["date"],
                 y=df["value"],
                 name=component_label,
-                mode="lines",
-                line={"color": CHART_PALETTE[index % len(CHART_PALETTE)]},
+                mode=_line_mode(style),
+                line=_line_style(palette[index % len(palette)], index, style),
+                marker=_marker_style(palette[index % len(palette)], style),
             )
         )
         has_data = True
@@ -459,7 +576,7 @@ def render_decomposition_chart(payload: Any, title: str = "Сезонная де
         st.info("Backend не вернул компоненты декомпозиции.")
         return
 
-    fig.update_layout(title=title, xaxis_title="Дата", yaxis_title="Значение", hovermode="x unified", height=480)
+    _apply_chart_layout(fig, style, title=title, xaxis_title="Дата", yaxis_title="Значение", hovermode="x unified", height=480)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -483,8 +600,21 @@ def render_extremes_chart(series_payload: Any, extremes_payload: Any, title: str
         st.info("Данные для графика экстремумов отсутствуют.")
         return
 
+    style = get_chart_style()
+    base_color = str(style.get("chart_primary_color") or DEFAULT_CHART_COLOR)
+    high_color = str(style.get("chart_accent_color") or "#17b6d6")
+    low_color = str(style.get("chart_negative_color") or "#07111f")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=base_df["date"], y=base_df["value"], name="Временной ряд", mode="lines", line={"color": DEFAULT_CHART_COLOR}))
+    fig.add_trace(
+        go.Scatter(
+            x=base_df["date"],
+            y=base_df["value"],
+            name="Временной ряд",
+            mode=_line_mode(style),
+            line=_line_style(base_color, 0, style),
+            marker=_marker_style(base_color, style),
+        )
+    )
 
     if not values_df.empty and {"date", "value", "kind"}.issubset(values_df.columns):
         high_df = values_df[values_df["kind"] == "high"]
@@ -494,18 +624,18 @@ def render_extremes_chart(series_payload: Any, extremes_payload: Any, title: str
         low_df = pd.DataFrame(_records_from_keys(extremes_payload, ("minima", "minimums", "low_extremes")))
 
     if not high_df.empty and {"date", "value"}.issubset(high_df.columns):
-        fig.add_trace(go.Scatter(x=high_df["date"], y=high_df["value"], name="Высокие экстремумы", mode="markers", marker={"size": 11, "color": "#17b6d6"}))
+        fig.add_trace(go.Scatter(x=high_df["date"], y=high_df["value"], name="Высокие экстремумы", mode="markers", marker=_marker_style(high_color, style, size=11)))
     if not low_df.empty and {"date", "value"}.issubset(low_df.columns):
-        fig.add_trace(go.Scatter(x=low_df["date"], y=low_df["value"], name="Низкие экстремумы", mode="markers", marker={"size": 11, "color": "#07111f"}))
+        fig.add_trace(go.Scatter(x=low_df["date"], y=low_df["value"], name="Низкие экстремумы", mode="markers", marker=_marker_style(low_color, style, size=11)))
 
     thresholds = extremes_payload.get("thresholds") if isinstance(extremes_payload, dict) else {}
     if isinstance(thresholds, dict):
         if thresholds.get("p95") is not None:
-            fig.add_hline(y=thresholds["p95"], line_dash="dash", line_color="#17b6d6", annotation_text="p95")
+            fig.add_hline(y=thresholds["p95"], line_dash=_series_dash(1, style), line_color=high_color, annotation_text="p95")
         if thresholds.get("p05") is not None:
-            fig.add_hline(y=thresholds["p05"], line_dash="dash", line_color="#07111f", annotation_text="p05")
+            fig.add_hline(y=thresholds["p05"], line_dash=_series_dash(1, style), line_color=low_color, annotation_text="p05")
 
-    fig.update_layout(title=title, xaxis_title="Дата", yaxis_title="Значение", hovermode="x unified", height=480)
+    _apply_chart_layout(fig, style, title=title, xaxis_title="Дата", yaxis_title="Значение", hovermode="x unified", height=480)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -537,6 +667,7 @@ def render_correlation_heatmap(payload: Any, title: str = "Корреляцио�
         st.info("Backend не вернул матрицу корреляций.")
         return
 
+    style = get_chart_style()
     fig = go.Figure(
         go.Heatmap(
             z=matrix,
@@ -544,13 +675,17 @@ def render_correlation_heatmap(payload: Any, title: str = "Корреляцио�
             y=labels,
             zmin=-1,
             zmax=1,
-            colorscale=[[0, "#07111f"], [0.5, "#f8fbff"], [1, "#17b6d6"]],
+            colorscale=[
+                [0, str(style.get("chart_negative_color") or "#07111f")],
+                [0.5, "#f8fbff"],
+                [1, str(style.get("chart_accent_color") or style.get("chart_primary_color") or "#17b6d6")],
+            ],
             text=matrix,
             texttemplate="%{text:.2f}",
             hovertemplate="%{y} × %{x}: %{z:.3f}<extra></extra>",
         )
     )
-    fig.update_layout(title=title, height=520)
+    _apply_chart_layout(fig, style, title=title, height=520)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -570,6 +705,8 @@ def render_correlation_scatter(payload: Any, title: str = "Диаграммы к
         st.info("Пары параметров для scatter-графиков отсутствуют.")
         return
 
+    style = get_chart_style()
+    marker_color = str(style.get("chart_primary_color") or DEFAULT_CHART_COLOR)
     st.subheader(title)
     for pair in pairs:
         points = pd.DataFrame(_records_from_keys(pair, ("points", "values", "data", "items")))
@@ -585,11 +722,13 @@ def render_correlation_scatter(payload: Any, title: str = "Диаграммы к
                 y=points["y"],
                 name="Наблюдения",
                 mode="markers",
-                marker={"size": 9, "color": DEFAULT_CHART_COLOR, "opacity": 0.72},
+                marker={**_marker_style(marker_color, style), "opacity": 0.72},
                 text=points["date"] if "date" in points.columns else None,
             )
         )
-        fig.update_layout(
+        _apply_chart_layout(
+            fig,
+            style,
             title=f"{x_name} × {y_name}" + (f" · r={correlation}" if correlation is not None else ""),
             xaxis_title=str(x_name),
             yaxis_title=str(y_name),
@@ -642,16 +781,24 @@ def render_bar_chart(
         st.info("Backend не вернул подходящие поля для столбчатого графика.")
         return
 
-    bar_kwargs: dict[str, Any] = {"x": df[y_key], "y": df[x_key], "orientation": "h"}
+    style = get_chart_style()
+    bar_kwargs: dict[str, Any] = {
+        "x": df[y_key],
+        "y": df[x_key],
+        "orientation": "h",
+        "opacity": _bar_opacity(style),
+    }
     if color_map:
         source_key = color_key if color_key in df.columns else x_key
         bar_kwargs["marker_color"] = [
-            _color_for_key(color_map, value) or DEFAULT_CHART_COLOR
+            _color_for_key(color_map, value) or str(style.get("chart_bar_color") or DEFAULT_CHART_COLOR)
             for value in df[source_key]
         ]
+    else:
+        bar_kwargs["marker_color"] = str(style.get("chart_bar_color") or DEFAULT_CHART_COLOR)
 
     fig = go.Figure(go.Bar(**bar_kwargs))
-    fig.update_layout(title=title, xaxis_title="Значение", yaxis_title="", height=420)
+    _apply_chart_layout(fig, style, title=title, xaxis_title="Значение", yaxis_title="", height=420)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -686,21 +833,24 @@ def render_grouped_bar_chart(
         st.info("Backend не вернул подходящие поля для группового графика.")
         return
 
+    style = get_chart_style()
+    palette = _style_palette(style)
     fig = go.Figure()
     groups = list(dict.fromkeys(df[group_key].tolist()))
     for index, group in enumerate(groups):
         group_df = df[df[group_key] == group]
-        color = _color_for_key(color_map, group) or CHART_PALETTE[index % len(CHART_PALETTE)]
+        color = _color_for_key(color_map, group) or palette[index % len(palette)]
         fig.add_trace(
             go.Bar(
                 x=group_df[x_key],
                 y=group_df[y_key],
                 name=str(group),
                 marker_color=color,
+                opacity=_bar_opacity(style),
             )
         )
 
-    fig.update_layout(title=title, xaxis_title="", yaxis_title="Значение", barmode="group", height=460)
+    _apply_chart_layout(fig, style, title=title, xaxis_title="", yaxis_title="Значение", barmode="group", height=460)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -727,10 +877,33 @@ def render_climatogram(payload: Any) -> None:
         st.info("Backend не вернул поля температуры и осадков для климатограммы.")
         return
 
+    style = get_chart_style()
+    temperature_color = str(style.get("chart_primary_color") or DEFAULT_CHART_COLOR)
+    precipitation_color = str(style.get("chart_bar_color") or style.get("chart_accent_color") or "#17b6d6")
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=df[month_col], y=df[precip_col], name="Осадки", yaxis="y2", opacity=0.55))
-    fig.add_trace(go.Scatter(x=df[month_col], y=df[temp_col], name="Температура", mode="lines+markers"))
-    fig.update_layout(
+    fig.add_trace(
+        go.Bar(
+            x=df[month_col],
+            y=df[precip_col],
+            name="Осадки",
+            yaxis="y2",
+            opacity=_bar_opacity(style, 0.55),
+            marker_color=precipitation_color,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df[month_col],
+            y=df[temp_col],
+            name="Температура",
+            mode=_line_mode(style),
+            line=_line_style(temperature_color, 0, style),
+            marker=_marker_style(temperature_color, style),
+        )
+    )
+    _apply_chart_layout(
+        fig,
+        style,
         title="Климатограмма",
         xaxis_title="Месяц",
         yaxis_title="Температура",
@@ -910,6 +1083,8 @@ def render_multi_climatograms(
     )
 
     group_labels = list(dict.fromkeys(df["group_label"].tolist()))
+    style = get_chart_style()
+    palette = _style_palette(style)
     for group_label in group_labels:
         group = df[df["group_label"] == group_label]
         fig = go.Figure()
@@ -920,11 +1095,11 @@ def render_multi_climatograms(
             station_key = first_row.get("station_id")
             temperature_color = (
                 _color_for_key(color_map, f"{station_key}:temperature")
-                or CHART_PALETTE[trace_index % len(CHART_PALETTE)]
+                or palette[trace_index % len(palette)]
             )
             precipitation_color = (
                 _color_for_key(color_map, f"{station_key}:precipitation")
-                or temperature_color
+                or str(style.get("chart_bar_color") or temperature_color)
             )
             legend_group = f"{group_label}-{trace_label}"
             fig.add_trace(
@@ -933,7 +1108,7 @@ def render_multi_climatograms(
                     y=trace["precipitation_sum"],
                     name=f"Осадки · {trace_label}",
                     yaxis="y2",
-                    opacity=0.34,
+                    opacity=_bar_opacity(style, 0.34),
                     marker_color=precipitation_color,
                     legendgroup=legend_group,
                 )
@@ -943,15 +1118,17 @@ def render_multi_climatograms(
                     x=trace["month"],
                     y=trace["temperature_mean"],
                     name=f"Температура · {trace_label}",
-                    mode="lines+markers",
-                    line={"color": temperature_color, "dash": LINE_DASHES[trace_index % len(LINE_DASHES)]},
-                    marker={"color": temperature_color},
+                    mode=_line_mode(style),
+                    line=_line_style(temperature_color, trace_index, style),
+                    marker=_marker_style(temperature_color, style),
                     legendgroup=legend_group,
                 )
             )
 
         chart_title = title if len(group_labels) == 1 else f"{title}: {group_label}"
-        fig.update_layout(
+        _apply_chart_layout(
+            fig,
+            style,
             title=chart_title,
             xaxis_title="Месяц",
             xaxis={"tickmode": "array", "tickvals": MONTH_TICKS, "ticktext": MONTH_LABELS},
@@ -1010,6 +1187,8 @@ def render_multi_climatogram_scatter(
     )
 
     group_labels = list(dict.fromkeys(df["group_label"].tolist()))
+    style = get_chart_style()
+    palette = _style_palette(style)
     for group_label in group_labels:
         group = df[df["group_label"] == group_label]
         fig = go.Figure()
@@ -1023,7 +1202,7 @@ def render_multi_climatogram_scatter(
             color = (
                 _color_for_key(color_map, f"{station_key}:temperature")
                 or _color_for_key(color_map, f"{station_key}:precipitation")
-                or CHART_PALETTE[trace_index % len(CHART_PALETTE)]
+                or palette[trace_index % len(palette)]
             )
             polygon_trace = _closed_month_trace(trace) if connect_months and close_polygon else trace
             if connect_months and close_polygon and len(polygon_trace) > len(trace):
@@ -1036,12 +1215,8 @@ def render_multi_climatogram_scatter(
                         showlegend=False,
                         hoverinfo="skip",
                         fill="toself",
-                        fillcolor=_hex_to_rgba(color, 0.12),
-                        line={
-                            "color": color,
-                            "dash": LINE_DASHES[trace_index % len(LINE_DASHES)],
-                            "width": 2.8,
-                        },
+                        fillcolor=_hex_to_rgba(color, min(_bar_opacity(style, 0.12), 0.32)),
+                        line=_line_style(color, trace_index, style),
                     )
                 )
             mode = "lines+markers" if connect_months else "markers"
@@ -1059,8 +1234,8 @@ def render_multi_climatogram_scatter(
                     text=text_values,
                     textposition="top center",
                     customdata=trace[["station_name", "period_label", "month_sequence_label"]].to_numpy(),
-                    marker={"size": 12, "color": color, "line": {"color": "#f8fbff", "width": 1.4}},
-                    line={"color": color, "dash": LINE_DASHES[trace_index % len(LINE_DASHES)], "width": 2.4},
+                    marker={**_marker_style(color, style), "line": {"color": "#f8fbff", "width": 1.4}},
+                    line=_line_style(color, trace_index, style),
                     hovertemplate=(
                         "<b>%{customdata[0]}</b><br>"
                         "%{customdata[1]}<br>"
@@ -1085,7 +1260,7 @@ def render_multi_climatogram_scatter(
                             "size": 17,
                             "symbol": "circle-open",
                             "color": color,
-                            "line": {"color": "#07111f", "width": 3},
+                            "line": {"color": str(style.get("chart_negative_color") or "#07111f"), "width": 3},
                         },
                         hoverinfo="skip",
                     )
@@ -1102,19 +1277,21 @@ def render_multi_climatogram_scatter(
                             "size": 17,
                             "symbol": "diamond-open",
                             "color": color,
-                            "line": {"color": "#17b6d6", "width": 3},
+                            "line": {"color": str(style.get("chart_accent_color") or "#17b6d6"), "width": 3},
                         },
                         hoverinfo="skip",
                     )
                 )
 
         if group[x_axis].notna().any():
-            fig.add_vline(x=group[x_axis].median(), line_dash="dot", line_color="#94a3b8", opacity=0.55)
+            fig.add_vline(x=group[x_axis].median(), line_dash=_series_dash(1, style), line_color=str(style.get("chart_accent_color") or "#94a3b8"), opacity=0.55)
         if group[y_axis].notna().any():
-            fig.add_hline(y=group[y_axis].median(), line_dash="dot", line_color="#94a3b8", opacity=0.55)
+            fig.add_hline(y=group[y_axis].median(), line_dash=_series_dash(1, style), line_color=str(style.get("chart_accent_color") or "#94a3b8"), opacity=0.55)
 
         chart_title = title if len(group_labels) == 1 else f"{title}: {group_label}"
-        fig.update_layout(
+        _apply_chart_layout(
+            fig,
+            style,
             title=chart_title,
             xaxis_title=_axis_label(x_axis),
             yaxis_title=_axis_label(y_axis),

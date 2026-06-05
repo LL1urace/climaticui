@@ -1,0 +1,61 @@
+{
+  "started_at_utc": "2026-06-04T23:04:02+00:00",
+  "finished_at_utc": "2026-06-04T23:04:07+00:00",
+  "frequencies": [
+    "daily",
+    "monthly"
+  ],
+  "tasks_total": 2560,
+  "tasks_completed": 2560,
+  "downloaded_this_run": 4,
+  "already_existed": 1764,
+  "available_files_total": 1768,
+  "missing_404_no_data_at_meteostat": 792,
+  "failed_retry_needed": 0,
+  "bytes_downloaded_this_run": 32611,
+  "bytes_available_counted": 7086570,
+  "stations_total": 20,
+  "stations_with_any_file": 20,
+  "stations_downloaded_this_run": 3,
+  "stations_without_any_file": 0,
+  "stations_with_failed_tasks": 0,
+  "status_counts": {
+    "downloaded": 4,
+    "exists": 1764,
+    "missing_404": 792
+  },
+  "by_frequency": {
+    "daily": {
+      "tasks_completed": 2540,
+      "downloaded_this_run": 3,
+      "already_existed": 1745,
+      "available_files_total": 1748,
+      "missing_404_no_data": 792,
+      "failed_retry_needed": 0,
+      "stations_with_any_file": 20,
+      "status_counts": {
+        "downloaded": 3,
+        "exists": 1745,
+        "missing_404": 792
+      }
+    },
+    "monthly": {
+      "tasks_completed": 20,
+      "downloaded_this_run": 1,
+      "already_existed": 19,
+      "available_files_total": 20,
+      "missing_404_no_data": 0,
+      "failed_retry_needed": 0,
+      "stations_with_any_file": 20,
+      "status_counts": {
+        "downloaded": 1,
+        "exists": 19
+      }
+    }
+  },
+  "complete_terminal_check": {
+    "ok": true,
+    "meaning": "true means every manifest task ended as downloaded/exists or missing_404; false means some tasks had errors and should be retried"
+  },
+  "stations_without_files_preview": []
+}

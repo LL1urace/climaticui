@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.api import analysis
 from app.api.client import ApiError
+from app.components.chart_settings import render_chart_visual_controls
 from app.components.charts import (
     climatogram_axis_options,
     climatogram_records_dataframe,
@@ -449,6 +450,12 @@ try:
         overlay_stations = st.checkbox("Накладывать метеостанции", value=True, key="climatogram_overlay_stations")
         overlay_periods = st.checkbox("Накладывать периоды", value=False, key="climatogram_overlay_periods")
         color_map = _render_color_palette(stations, selected_station_ids)
+        render_chart_visual_controls(
+            "climatogram",
+            title="Стиль климатограмм",
+            caption="Настройки линий температуры, столбцов осадков и точечной климатограммы.",
+            controls=("line", "bar", "template"),
+        )
 
         st.subheader("Вид графика")
         if st.session_state.get("climatogram_chart_type") not in CHART_TYPES:

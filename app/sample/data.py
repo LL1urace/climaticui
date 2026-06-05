@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 from datetime import date, datetime
+import gzip
 import math
 
 from app.sample.storage import SAMPLE_DATA_DIR, load_stations_from_sqlite
@@ -230,6 +231,7 @@ PARAMETERS = [
 BUILTIN_SAMPLE_STATION_IDS = {int(station["id"]) for station in STATIONS}
 STATIONS = load_stations_from_sqlite(STATIONS)
 ARCTIC_MONTHLY_CSV = SAMPLE_DATA_DIR / "arctic_meteostat_monthly_1995_2024.csv"
+ARCTIC_BULK_DIR = SAMPLE_DATA_DIR / "meteostat_arctic_20_daily_monthly"
 TEMPERATURE_PROFILES = {
     1: [-8.2, -6.4, -0.4, 7.4, 14.8, 18.6, 20.5, 18.7, 12.8, 5.9, -0.6, -5.4],
     2: [-2.0, 0.2, 6.8, 13.6, 18.8, 23.6, 26.2, 24.6, 18.4, 10.8, 3.8, -1.1],
@@ -287,6 +289,57 @@ def _first_float(row: dict[str, str], columns: tuple[str, ...]) -> float | None:
     return None
 
 
+def _bulk_station_id(path) -> str:
+    """Возвращает код станции из имени файла Meteostat pack."""
+
+    return path.name.split(".", 1)[0]
+
+
+def _normalized_monthly_date(row: dict[str, str]) -> str | None:
+    """Нормализует дату monthly-строки из year/month или date/time."""
+
+    explicit_date = row.get("date") or row.get("observed_at") or row.get("time")
+    if explicit_date:
+        return explicit_date[:10]
+    try:
+        year = int(row.get("year") or "")
+        month = int(row.get("month") or "")
+    except ValueError:
+        return None
+    try:
+        return date(year, month, 1).isoformat()
+    except ValueError:
+        return None
+
+
+def _load_bulk_monthly_rows() -> list[dict[str, str]]:
+    """Загружает monthly CSV.gz из нового 20-станционного demo pack."""
+
+    monthly_dir = ARCTIC_BULK_DIR / "monthly"
+    if not monthly_dir.exists():
+        return []
+
+    rows: list[dict[str, str]] = []
+    for path in sorted(monthly_dir.glob("*.csv.gz")) + sorted(monthly_dir.glob("*.csv")):
+        station_id = _bulk_station_id(path)
+        opener = gzip.open if path.suffix == ".gz" else open
+        with opener(path, mode="rt", encoding="utf-8-sig", newline="") as file:
+            for row in csv.DictReader(file):
+                observed_at = _normalized_monthly_date(row)
+                if not observed_at:
+                    continue
+                rows.append(
+                    {
+                        **row,
+                        "station_id": row.get("station_id") or station_id,
+                        "date": observed_at,
+                        "monthly_url": f"local://{path.relative_to(SAMPLE_DATA_DIR).as_posix()}",
+                        "source_name": "meteostat_arctic_20_monthly",
+                    }
+                )
+    return rows
+
+
 def _load_arctic_monthly_rows() -> list[dict[str, str]]:
     """Загружает реальные месячные данные арктических станций из CSV.
 
@@ -294,6 +347,9 @@ def _load_arctic_monthly_rows() -> list[dict[str, str]]:
         Список строк CSV или пустой список, если файл не найден.
     """
 
+    bulk_rows = _load_bulk_monthly_rows()
+    if bulk_rows:
+        return bulk_rows
     if not ARCTIC_MONTHLY_CSV.exists():
         return []
     with ARCTIC_MONTHLY_CSV.open(encoding="utf-8-sig", newline="") as file:
@@ -406,7 +462,7 @@ def _real_monthly_observations(start_id: int = 1) -> list[dict]:
                     "observed_at": observed_at,
                     "value": round(value, 3),
                     "quality_flag": "real_monthly",
-                    "source_name": "meteostat_monthly_1995_2024",
+                    "source_name": row.get("source_name") or "meteostat_monthly_1995_2024",
                     "created_at": datetime(2026, 1, 1).isoformat(),
                 }
             )

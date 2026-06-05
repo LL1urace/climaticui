@@ -79,6 +79,34 @@ def test_sample_client_contains_arctic_stations() -> None:
 
     client = SampleApiClient(token="sample")
     stations = client.get("/stations")["items"]
+    real_station_codes = {
+        "20674",
+        "20744",
+        "20891",
+        "20967",
+        "21432",
+        "21504",
+        "21647",
+        "21802",
+        "21824",
+        "21921",
+        "21931",
+        "21946",
+        "22113",
+        "22217",
+        "23022",
+        "23205",
+        "23330",
+        "25042",
+        "25062",
+        "25123",
+    }
+    station_codes = {str(station["code"]) for station in stations}
+    real_flagged_codes = {
+        str(station["code"])
+        for station in stations
+        if station.get("has_real_monthly_data") and station.get("data_quality") == "real_monthly"
+    }
     arctic_station = next(station for station in stations if station["code"] == "20674")
     availability = client.get(
         "/observations/availability",
@@ -86,10 +114,12 @@ def test_sample_client_contains_arctic_stations() -> None:
     )
 
     assert len(stations) >= 7530
+    assert real_station_codes <= station_codes
+    assert real_station_codes <= real_flagged_codes
     assert arctic_station["name"] == "Ostrov Dikson"
-    assert availability["date_min"] == "1995-01-01"
-    assert availability["date_max"] == "2024-12-01"
-    assert availability["count"] == 360
+    assert availability["date_min"] == "1936-01-01"
+    assert availability["date_max"] == "2026-05-01"
+    assert availability["count"] == 1085
 
 
 def test_sample_client_loads_eurasia_stations_from_sqlite() -> None:
@@ -128,7 +158,13 @@ def test_sample_client_saves_analysis_set_per_station() -> None:
             "selected_parameters": [1, 2],
             "period_start": "1995-01-01",
             "period_end": "2024-12-01",
+            "aggregation": "yearly",
             "mode": "dashboard",
+            "modes": ["dashboard", "forecast", "correlation"],
+            "session_snapshot": {
+                "forecast_model": "neural_mlp",
+                "correlation_method": "spearman",
+            },
         },
     )
     saved_sets = client.get("/saved-analysis-sets")["items"]
@@ -137,7 +173,32 @@ def test_sample_client_saves_analysis_set_per_station() -> None:
     assert record["station_id"] == 20674
     assert record["parameter_id"] == 1
     assert record["selected_parameters"] == [1, 2]
+    assert record["aggregation"] == "yearly"
+    assert record["modes"] == ["dashboard", "forecast", "correlation"]
+    assert record["session_snapshot"]["forecast_model"] == "neural_mlp"
     assert saved_sets[0]["id"] == record["id"]
+
+
+def test_sample_client_returns_raw_observation_slice() -> None:
+    """Проверяет выгрузку полного сырого среза наблюдений без агрегации."""
+
+    client = SampleApiClient(token="sample")
+    result = client.get(
+        "/observations",
+        params={
+            "station_id": 20674,
+            "parameter_id": 1,
+            "date_from": "2020-01-01",
+            "date_to": "2020-12-31",
+        },
+    )
+
+    rows = result["items"]
+    assert len(rows) == 366
+    assert rows[0]["observed_at"] == "2020-01-01"
+    assert rows[-1]["observed_at"] == "2020-12-31"
+    assert rows[0]["source_name"] == "local_meteostat_daily_csv_gz"
+    assert all(str(row["station_id"]) == "20674" for row in rows)
 
 
 def test_sample_station_comparison_can_skip_missing_series() -> None:
@@ -160,6 +221,131 @@ def test_sample_station_comparison_can_skip_missing_series() -> None:
 
     assert result["stations"] == []
     assert result["skipped_stations"] == 1
+
+
+def test_sample_client_runs_forecast_models() -> None:
+    """Проверяет базовые клиентские модели прогнозирования."""
+
+    client = SampleApiClient(token="sample")
+    models = [
+        "linear_trend",
+        "moving_average",
+        "seasonal_naive",
+        "exponential_smoothing",
+        "trend_seasonal",
+        "neural_mlp",
+        "neural_seasonal_mlp",
+    ]
+
+    for model in models:
+        result = client.post(
+            "/forecasts/run",
+            json={
+                "station_id": 20674,
+                "parameter_id": 1,
+                "date_from": "2020-01-01",
+                "date_to": "2024-12-01",
+                "aggregation": "monthly",
+                "model": model,
+                "training_mode": "fit_selected_period",
+                "horizon": 6,
+                "horizon_unit": "months",
+                "options": {"window": 6, "seasonal_period": 12, "alpha": 0.35, "hidden_units": 12},
+            },
+        )
+        values = result["forecast"]["values"]
+
+        assert result["status"] == "completed"
+        assert result["model"] == model
+        assert result["training"]["mode"] == "fit_selected_period"
+        assert result["metrics"]["status"] == "completed"
+        assert len(values) == 6
+        assert values[0]["date"] == "2025-01-01"
+        assert all(isinstance(item["value"], float) for item in values)
+
+
+def test_sample_client_forecast_pretraining_uses_extended_history() -> None:
+    """Проверяет режим предобучения на расширенной истории станции."""
+
+    client = SampleApiClient(token="sample")
+    result = client.post(
+        "/forecasts/run",
+        json={
+            "station_id": 20674,
+            "parameter_id": 1,
+            "date_from": "2024-01-01",
+            "date_to": "2024-12-01",
+            "aggregation": "monthly",
+            "model": "trend_seasonal",
+            "training_mode": "pretrained_station",
+            "horizon": 3,
+            "horizon_unit": "months",
+            "options": {"seasonal_period": 12},
+        },
+    )
+
+    assert result["training"]["mode"] == "pretrained_station"
+    assert result["training"]["selected_period_observations"] == 12
+    assert result["training"]["observations"] > result["training"]["selected_period_observations"]
+    assert result["model_params"]["seasonal_months"] == 12
+    assert len(result["forecast"]["values"]) == 3
+
+
+def test_sample_client_neural_forecast_returns_model_params() -> None:
+    """Проверяет нейросетевой прогноз с сезонными признаками."""
+
+    client = SampleApiClient(token="sample")
+    result = client.post(
+        "/forecasts/run",
+        json={
+            "station_id": 20674,
+            "parameter_id": 1,
+            "date_from": "2020-01-01",
+            "date_to": "2024-12-01",
+            "aggregation": "monthly",
+            "model": "neural_seasonal_mlp",
+            "training_mode": "pretrained_station",
+            "horizon": 4,
+            "horizon_unit": "months",
+            "options": {"window": 12, "hidden_units": 16, "ridge": 0.001},
+        },
+    )
+
+    assert result["model"] == "neural_seasonal_mlp"
+    assert result["station"]["station_id"] == 20674
+    assert result["model_params"]["network_type"] == "single_hidden_layer_mlp"
+    assert result["model_params"]["features"] == "lags_calendar_station"
+    assert result["model_params"]["station_features_used"] is True
+    assert result["model_params"]["station_feature_names"] == ["latitude", "longitude", "elevation"]
+    assert result["model_params"]["training_samples"] > 0
+    assert len(result["forecast"]["values"]) == 4
+    assert all(isinstance(item["value"], float) for item in result["forecast"]["values"])
+
+
+def test_sample_client_neural_forecast_changes_between_stations() -> None:
+    """Проверяет, что MLP-прогноз учитывает выбранную станцию."""
+
+    client = SampleApiClient(token="sample")
+    base_payload = {
+        "parameter_id": 1,
+        "date_from": "2020-01-01",
+        "date_to": "2024-12-01",
+        "aggregation": "monthly",
+        "model": "neural_seasonal_mlp",
+        "training_mode": "pretrained_station",
+        "horizon": 4,
+        "horizon_unit": "months",
+        "options": {"window": 12, "hidden_units": 16, "ridge": 0.001},
+    }
+
+    first = client.post("/forecasts/run", json={**base_payload, "station_id": 20674})
+    second = client.post("/forecasts/run", json={**base_payload, "station_id": 21824})
+    first_values = [item["value"] for item in first["forecast"]["values"]]
+    second_values = [item["value"] for item in second["forecast"]["values"]]
+
+    assert first["station"]["station_id"] == 20674
+    assert second["station"]["station_id"] == 21824
+    assert first_values != second_values
 
 
 def test_sample_client_returns_correlation_matrix_and_pairs() -> None:

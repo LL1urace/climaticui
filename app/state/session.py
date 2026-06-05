@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 import streamlit as st
+
+from app.components.saved_set_modes import normalize_saved_set_modes
 
 
 PERSISTED_FORM_VALUES_KEY = "persisted_form_values"
@@ -30,7 +34,9 @@ DEFAULT_KEYS = {
     "dashboard_map_show_only_selected": False,
     "dashboard_map_classification_cache": {},
     "dashboard_map_classification_gradient": "climate",
+    "dashboard_parameter_ids": [],
     "dashboard_saved_set_mode": "dashboard",
+    "dashboard_saved_set_modes": ["dashboard"],
     "last_saved_analysis_sets": [],
     "report_selected_sections": None,
     "report_include_cover": True,
@@ -47,6 +53,7 @@ DASHBOARD_CONTEXT_DEFAULTS = {
     "dashboard_date_from": None,
     "dashboard_date_to": None,
     "dashboard_aggregation": "monthly",
+    "dashboard_parameter_ids": [],
     "dashboard_map_show_only_selected": False,
     "dashboard_map_classification_cache": {},
 }
@@ -54,11 +61,49 @@ DASHBOARD_CONTEXT_DEFAULTS = {
 DASHBOARD_CONTEXT_WIDGET_KEYS = {
     "dashboard_station_multiselect",
     "dashboard_parameter",
+    "dashboard_parameter_ids",
     "dashboard_aggregation_select",
     "dashboard_period_date_from",
     "dashboard_period_date_to",
     "dashboard_map_pending_station_ids",
     "dashboard_ignore_next_map_selection",
+}
+
+RESTORABLE_STATE_PREFIXES = (
+    "dashboard_",
+    "analysis_",
+    "period_comparison_",
+    "period_compare_",
+    "period_station_color_",
+    "compare_",
+    "station_comparison_",
+    "climatogram_",
+    "forecast_",
+    "correlation_",
+    "report_",
+)
+RESTORABLE_STATE_KEYS = {"selected_station_id", "selected_parameter_id", "chart_active_scope"}
+NON_RESTORABLE_STATE_KEYS = {
+    "dashboard_filter_revision",
+    "dashboard_map_classification_cache",
+    "dashboard_map_pending_station_ids",
+    "dashboard_ignore_next_map_selection",
+    "dashboard_reset_pending",
+    "dashboard_reset_notice",
+    "dashboard_restored_saved_set_notice",
+}
+NON_RESTORABLE_STATE_PREFIXES = ("dashboard_stations_map_",)
+DATE_STATE_KEYS = {
+    "dashboard_date_from",
+    "dashboard_date_to",
+    "dashboard_period_date_from",
+    "dashboard_period_date_to",
+    "analysis_date_from",
+    "analysis_date_to",
+    "forecast_date_from",
+    "forecast_date_to",
+    "correlation_period_date_from",
+    "correlation_period_date_to",
 }
 
 
@@ -89,7 +134,7 @@ def clear_dashboard_context() -> None:
     for key in DASHBOARD_CONTEXT_WIDGET_KEYS:
         st.session_state.pop(key, None)
     for key in list(st.session_state):
-        if str(key).startswith(("dashboard_parameter_", "dashboard_stations_map_")):
+        if str(key).startswith(("dashboard_parameter_", "dashboard_parameters_", "dashboard_stations_map_")):
             st.session_state.pop(key, None)
     st.session_state.update(DASHBOARD_CONTEXT_DEFAULTS)
 
@@ -385,4 +430,153 @@ def remember_analysis(result: dict) -> None:
     analysis_run_id = result.get("analysis_run_id") or result.get("id") or result.get("run_id")
     st.session_state["last_analysis_run_id"] = analysis_run_id
     st.session_state["last_analysis_result"] = result
+
+
+def _saved_set_date(value: Any) -> date | None:
+    """Преобразует дату из сохранённого набора в объект date."""
+
+    if isinstance(value, date):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str) and value:
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def _saved_set_values(record: dict, *keys: str) -> Any:
+    """Возвращает первое непустое значение из сохранённого набора."""
+
+    for key in keys:
+        value = record.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _is_restorable_state_key(key: Any) -> bool:
+    """Checks whether a saved snapshot key can be restored into session state."""
+
+    key_text = str(key)
+    if key_text in NON_RESTORABLE_STATE_KEYS or key_text.startswith(NON_RESTORABLE_STATE_PREFIXES):
+        return False
+    return key_text in RESTORABLE_STATE_KEYS or key_text.startswith(RESTORABLE_STATE_PREFIXES)
+
+
+def _restore_snapshot_value(key: str, value: Any) -> Any:
+    """Converts JSON-safe snapshot values back to widget-friendly objects."""
+
+    if key in DATE_STATE_KEYS or key.endswith(("_date_from", "_date_to")):
+        return _saved_set_date(value) or value
+    if isinstance(value, list):
+        return [_restore_snapshot_value("", item) for item in value]
+    if isinstance(value, dict):
+        return {item_key: _restore_snapshot_value(str(item_key), item_value) for item_key, item_value in value.items()}
+    return value
+
+
+def _restore_snapshot_values(snapshot: Any) -> dict[str, Any]:
+    """Restores parameter snapshot values and returns the applied subset."""
+
+    if not isinstance(snapshot, dict):
+        return {}
+
+    restored: dict[str, Any] = {}
+    for key, value in snapshot.items():
+        key_text = str(key)
+        if _is_restorable_state_key(key_text):
+            restored[key_text] = _restore_snapshot_value(key_text, value)
+    if not restored:
+        return {}
+
+    st.session_state.update(restored)
+    persisted_values = st.session_state.setdefault(PERSISTED_FORM_VALUES_KEY, {})
+    persisted_values.update(restored)
+    return restored
+
+
+def restore_saved_analysis_set(record: dict) -> dict[str, Any]:
+    """Восстанавливает фильтры приложения из пользовательского сохранённого набора.
+
+    Args:
+        record: Запись из endpoint `/saved-analysis-sets`.
+
+    Returns:
+        Краткая сводка восстановленных значений.
+    """
+
+    init_session_state()
+    station_id = _saved_set_values(record, "station_id", "station", "stationId")
+    station_ids = _saved_set_values(record, "station_ids", "selected_station_ids", "selected_stations") or []
+    if station_id is not None:
+        station_ids = [station_id]
+    if not isinstance(station_ids, list):
+        station_ids = [station_ids]
+
+    selected_parameters = _saved_set_values(record, "selected_parameters", "parameter_ids", "parameters") or []
+    if not isinstance(selected_parameters, list):
+        selected_parameters = [selected_parameters]
+    parameter_id = _saved_set_values(record, "parameter_id", "parameter", "parameterId")
+    if parameter_id is None and selected_parameters:
+        parameter_id = selected_parameters[0]
+    dashboard_parameter_ids = selected_parameters or ([parameter_id] if parameter_id is not None else [])
+
+    date_from = _saved_set_date(_saved_set_values(record, "period_start", "date_from", "periodStart"))
+    date_to = _saved_set_date(_saved_set_values(record, "period_end", "date_to", "periodEnd"))
+    aggregation = _saved_set_values(record, "aggregation") or st.session_state.get("dashboard_aggregation") or "monthly"
+    mode = _saved_set_values(record, "mode") or "dashboard"
+    modes = normalize_saved_set_modes(record, fallback=mode) or [str(mode)]
+    restored_snapshot: dict[str, Any] = {}
+    for snapshot_key in ("session_snapshot", "parameters_snapshot", "extra_parameters", "persisted_form_values"):
+        restored_snapshot.update(_restore_snapshot_values(record.get(snapshot_key)))
+
+    st.session_state["dashboard_station_ids"] = station_ids
+    st.session_state["selected_station_id"] = station_ids[0] if station_ids else None
+    st.session_state["selected_parameter_id"] = parameter_id
+    st.session_state["dashboard_parameter_ids"] = dashboard_parameter_ids
+    st.session_state["dashboard_date_from"] = date_from
+    st.session_state["dashboard_date_to"] = date_to
+    st.session_state["dashboard_aggregation"] = aggregation
+    st.session_state["dashboard_saved_set_mode"] = modes[0] if modes else mode
+    st.session_state["dashboard_saved_set_modes"] = modes
+    st.session_state["restored_saved_analysis_set"] = record
+    st.session_state["dashboard_restored_saved_set_notice"] = True
+
+    st.session_state["dashboard_filter_revision"] = int(st.session_state.get("dashboard_filter_revision") or 0) + 1
+    dashboard_parameter_key = f"dashboard_parameter_{st.session_state['dashboard_filter_revision']}"
+    dashboard_parameters_key = f"dashboard_parameters_{st.session_state['dashboard_filter_revision']}"
+    widget_values = {
+        "dashboard_station_multiselect": station_ids,
+        dashboard_parameter_key: parameter_id,
+        dashboard_parameters_key: dashboard_parameter_ids,
+        "dashboard_parameter_ids": dashboard_parameter_ids,
+        "dashboard_aggregation_select": aggregation,
+        "dashboard_period_date_from": date_from,
+        "dashboard_period_date_to": date_to,
+        "dashboard_saved_set_modes": modes,
+        "analysis_station": station_ids[0] if station_ids else None,
+        "analysis_parameter": parameter_id,
+        "analysis_aggregation": aggregation,
+        "analysis_date_from": date_from,
+        "analysis_date_to": date_to,
+    }
+    st.session_state.update(widget_values)
+    persisted_values = st.session_state.setdefault(PERSISTED_FORM_VALUES_KEY, {})
+    persisted_values.update(widget_values)
+    st.session_state["dashboard_ignore_next_map_selection"] = True
+
+    return {
+        "station_ids": station_ids,
+        "parameter_id": parameter_id,
+        "selected_parameters": dashboard_parameter_ids,
+        "date_from": date_from,
+        "date_to": date_to,
+        "aggregation": aggregation,
+        "mode": modes[0] if modes else mode,
+        "modes": modes,
+        "restored_snapshot_keys": sorted(restored_snapshot),
+    }
 

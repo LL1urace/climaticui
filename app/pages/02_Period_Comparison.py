@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.api import comparisons
 from app.api.client import ApiError
+from app.components.chart_settings import render_chart_visual_controls
 from app.components.charts import render_grouped_bar_chart
 from app.components.errors import render_api_error
 from app.components.filters import (
@@ -393,6 +394,12 @@ try:
             default="mean",
         )
         station_colors = _render_station_palette(stations, selected_station_ids)
+        render_chart_visual_controls(
+            "period_comparison",
+            title="Диаграмма периодов",
+            caption="Настройки столбчатой диаграммы сравнения периодов.",
+            controls=("bar", "template"),
+        )
 except ApiError as error:
     render_api_error(error)
     st.stop()

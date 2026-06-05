@@ -1,0 +1,45 @@
+Meteostat Bulk Download Summary
+================================
+Started UTC: 2026-06-04T23:04:02+00:00
+Finished UTC: 2026-06-04T23:04:07+00:00
+
+Tasks total: 2 560
+Tasks completed: 2 560
+Downloaded this run: 4
+Already existed locally: 1 764
+Available files total: 1 768
+Missing 404 / no data at Meteostat: 792
+Failed / retry needed: 0
+Downloaded bytes this run: 31.85 KB
+Available bytes counted: 6.76 MB
+
+Stations total: 20
+Stations with any file: 20
+Stations downloaded this run: 3
+Stations without any file: 0
+Stations with failed tasks: 0
+
+By frequency:
+  daily:
+    tasks_completed: 2 540
+    downloaded_this_run: 3
+    already_existed: 1 745
+    available_files_total: 1 748
+    missing_404_no_data: 792
+    failed_retry_needed: 0
+    stations_with_any_file: 20
+  monthly:
+    tasks_completed: 20
+    downloaded_this_run: 1
+    already_existed: 19
+    available_files_total: 20
+    missing_404_no_data: 0
+    failed_retry_needed: 0
+    stations_with_any_file: 20
+
+Interpretation:
+  downloaded_this_run = files physically downloaded during this run.
+  already_existed = non-empty .csv.gz files already present locally and skipped.
+  available_files_total = downloaded_this_run + already_existed.
+  missing_404_no_data = Meteostat returned 404, so the bulk file does not exist there.
+  failed_retry_needed = network/server/empty-file errors; rerun the script to retry them.

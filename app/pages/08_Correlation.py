@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.api import analysis
 from app.api.client import ApiError
+from app.components.chart_settings import render_chart_visual_controls
 from app.components.charts import render_correlation_heatmap, render_correlation_scatter
 from app.components.errors import render_api_error
 from app.components.filters import (
@@ -122,6 +123,15 @@ require_auth()
 render_sidebar()
 page_title("Корреляционный анализ", "Оценка связи между климатическими параметрами одной метеостанции.")
 render_home_button()
+
+with st.sidebar:
+    st.subheader("Настройки отображения")
+    render_chart_visual_controls(
+        "correlation",
+        title="Графики корреляций",
+        caption="Цвета матрицы корреляций и точки scatter-диаграмм.",
+        controls=("scatter", "heatmap", "template"),
+    )
 
 try:
     with st.container(border=True, key="correlation_parameters_form"):

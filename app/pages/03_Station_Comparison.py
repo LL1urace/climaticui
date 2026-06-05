@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.api import comparisons, observations
 from app.api.client import ApiError
+from app.components.chart_settings import render_chart_visual_controls
 from app.components.charts import render_bar_chart, render_multi_timeseries_chart
 from app.components.errors import render_api_error
 from app.components.filters import (
@@ -253,6 +254,12 @@ try:
     with st.sidebar:
         st.subheader("Настройки отображения")
         station_colors = _render_station_palette(stations, selected_stations)
+        render_chart_visual_controls(
+            "station_comparison",
+            title="Графики сравнения станций",
+            caption="Стиль временных рядов и столбчатой диаграммы результатов.",
+            controls=("line", "bar", "template"),
+        )
         show_only_selected_on_map, comparison_map_palette, comparison_map_basemap = _render_map_settings(selected_stations)
 except ApiError as error:
     render_api_error(error)

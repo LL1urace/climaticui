@@ -11,6 +11,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.api import analysis, observations
 from app.api.client import ApiError
+from app.components.analysis_help import render_analysis_result_help
+from app.components.chart_settings import render_chart_visual_controls
 from app.components.charts import (
     render_anomaly_chart,
     render_decomposition_chart,
@@ -62,6 +64,12 @@ def scalar_metrics(payload: dict) -> dict:
     }
 
 
+def has_method_result(results: dict, name: str) -> bool:
+    """Проверяет, вернул ли backend результат конкретного метода."""
+
+    return bool(method_payload(results, name))
+
+
 setup_page("Анализ")
 init_session_state()
 require_auth()
@@ -80,11 +88,20 @@ try:
         )
         methods = analysis_methods()
         with st.expander("Дополнительные параметры методов", expanded=False):
-            options = analysis_options("analysis", filters["station_id"], filters["parameter_id"])
+            options = analysis_options("analysis", filters["station_id"], filters["parameter_id"], methods)
         run_clicked = st.button("Запустить анализ", type="primary", use_container_width=True)
 except ApiError as error:
     render_api_error(error)
     st.stop()
+
+with st.sidebar:
+    st.subheader("Настройки отображения")
+    render_chart_visual_controls(
+        "analysis",
+        title="Графики анализа",
+        caption="Стиль исходного ряда, трендов, сглаживания, аномалий, декомпозиции и экстремумов.",
+        controls=("line", "bar", "negative", "template"),
+    )
 
 if run_clicked:
     validation = validate_common_filters(filters)
@@ -134,65 +151,80 @@ timeseries = st.session_state.get("last_timeseries") or result.get("timeseries")
 st.subheader("Временной ряд")
 render_timeseries_chart(timeseries, title="Исходный временной ряд")
 
-st.subheader("Базовая статистика")
-basic_statistics = method_payload(results, "basic_statistics")
-render_metric_cards(basic_statistics.get("metrics") if "metrics" in basic_statistics else basic_statistics)
-render_table(basic_statistics, empty_message="Базовая статистика отсутствует.")
+if has_method_result(results, "basic_statistics"):
+    st.subheader("Базовая статистика")
+    basic_statistics = method_payload(results, "basic_statistics")
+    render_metric_cards(basic_statistics.get("metrics") if "metrics" in basic_statistics else basic_statistics)
+    render_table(basic_statistics, empty_message="Базовая статистика отсутствует.")
+    render_analysis_result_help("basic_statistics")
 
-st.subheader("Климатические нормы и аномалии")
 climate_norm = method_payload(results, "climate_norm")
 anomalies = method_payload(results, "anomalies")
-norm_col, anomaly_col = st.columns([0.42, 0.58])
-with norm_col:
+if climate_norm or anomalies:
+    st.subheader("Климатические нормы и аномалии")
+if climate_norm:
+    st.markdown("**Климатическая норма**")
     render_table(climate_norm, empty_message="Климатическая норма отсутствует.")
-with anomaly_col:
+    render_analysis_result_help("climate_norm")
+if anomalies:
+    st.markdown("**Аномалии**")
     render_metric_cards(scalar_metrics(anomalies), columns=2)
-render_anomaly_chart(timeseries, anomalies, title="График аномалий")
+    render_anomaly_chart(timeseries, anomalies, title="График аномалий")
+    render_analysis_result_help("anomalies")
 
-st.subheader("Тренды")
 linear_trend = method_payload(results, "linear_trend")
 mann_kendall = method_payload(results, "mann_kendall")
-render_overlay_chart(
-    timeseries,
-    {"Линейный тренд": linear_trend.get("trend_line") or linear_trend},
-    title="Исходный ряд и линейный тренд",
-)
-trend_cols = st.columns(2)
-with trend_cols[0]:
+if linear_trend or mann_kendall:
+    st.subheader("Тренды")
+if linear_trend:
     st.markdown("**Линейная регрессия**")
+    render_overlay_chart(
+        timeseries,
+        {"Линейный тренд": linear_trend.get("trend_line") or linear_trend},
+        title="Исходный ряд и линейный тренд",
+    )
     render_metric_cards(scalar_metrics(linear_trend), columns=3)
-with trend_cols[1]:
+    render_analysis_result_help("linear_trend")
+if mann_kendall:
     st.markdown("**Тест Манна-Кендалла**")
     render_metric_cards(scalar_metrics(mann_kendall), columns=3)
-render_table(mann_kendall, empty_message="Результат теста Манна-Кендалла отсутствует.")
+    render_table(mann_kendall, empty_message="Результат теста Манна-Кендалла отсутствует.")
+    render_analysis_result_help("mann_kendall")
 
-st.subheader("Сглаживание")
 moving_average = method_payload(results, "moving_average")
-render_overlay_chart(
-    timeseries,
-    {"Скользящее среднее": moving_average},
-    title="Исходный ряд и скользящее среднее",
-)
+if moving_average:
+    st.subheader("Сглаживание")
+    render_overlay_chart(
+        timeseries,
+        {"Скользящее среднее": moving_average},
+        title="Исходный ряд и скользящее среднее",
+    )
+    render_analysis_result_help("moving_average")
 
-st.subheader("Сезонная декомпозиция")
-render_decomposition_chart(method_payload(results, "seasonal_decomposition"))
+seasonal_decomposition = method_payload(results, "seasonal_decomposition")
+if seasonal_decomposition:
+    st.subheader("Сезонная декомпозиция")
+    render_decomposition_chart(seasonal_decomposition)
+    render_analysis_result_help("seasonal_decomposition")
 
-st.subheader("Экстремумы")
 extremes = method_payload(results, "extremes")
-thresholds = extremes.get("thresholds") if isinstance(extremes.get("thresholds"), dict) else {}
-counts = extremes.get("counts") if isinstance(extremes.get("counts"), dict) else {}
-extreme_metrics = {**(thresholds or {}), **(counts or {})}
-if extremes.get("top_n") is not None:
-    extreme_metrics["top_n"] = extremes.get("top_n")
-render_metric_cards(extreme_metrics, columns=5)
-render_extremes_chart(timeseries, extremes)
-extreme_cols = st.columns(2)
-with extreme_cols[0]:
-    st.markdown("**Минимумы**")
-    render_table(extremes.get("minima") if isinstance(extremes, dict) else None, empty_message="Минимумы отсутствуют.")
-with extreme_cols[1]:
-    st.markdown("**Максимумы**")
-    render_table(extremes.get("maxima") if isinstance(extremes, dict) else None, empty_message="Максимумы отсутствуют.")
+if extremes:
+    st.subheader("Экстремумы")
+    thresholds = extremes.get("thresholds") if isinstance(extremes.get("thresholds"), dict) else {}
+    counts = extremes.get("counts") if isinstance(extremes.get("counts"), dict) else {}
+    extreme_metrics = {**(thresholds or {}), **(counts or {})}
+    if extremes.get("top_n") is not None:
+        extreme_metrics["top_n"] = extremes.get("top_n")
+    render_metric_cards(extreme_metrics, columns=5)
+    render_analysis_result_help("extremes")
+    render_extremes_chart(timeseries, extremes)
+    extreme_cols = st.columns(2)
+    with extreme_cols[0]:
+        st.markdown("**Минимумы**")
+        render_table(extremes.get("minima") if isinstance(extremes, dict) else None, empty_message="Минимумы отсутствуют.")
+    with extreme_cols[1]:
+        st.markdown("**Максимумы**")
+        render_table(extremes.get("maxima") if isinstance(extremes, dict) else None, empty_message="Максимумы отсутствуют.")
 
 render_method_errors(results)
 render_json_preview(result, "Полный JSON результата")

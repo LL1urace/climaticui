@@ -10,14 +10,37 @@ from typing import Any
 SAMPLE_DATA_DIR = Path(__file__).resolve().parent / "data"
 SAMPLE_SQLITE_DB = SAMPLE_DATA_DIR / "klimatika_sample.sqlite"
 REAL_MONTHLY_CSV = SAMPLE_DATA_DIR / "arctic_meteostat_monthly_1995_2024.csv"
+REAL_MONTHLY_BULK_DIR = SAMPLE_DATA_DIR / "meteostat_arctic_20_daily_monthly" / "monthly"
+
+
+def _bulk_monthly_station_ids() -> set[int]:
+    """Возвращает ID станций из нового monthly pack.
+
+    Returns:
+        Множество идентификаторов станций из файлов `monthly/<station>.csv.gz`.
+    """
+
+    if not REAL_MONTHLY_BULK_DIR.exists():
+        return set()
+
+    station_ids = set()
+    for path in [*REAL_MONTHLY_BULK_DIR.glob("*.csv.gz"), *REAL_MONTHLY_BULK_DIR.glob("*.csv")]:
+        station_code = path.name.split(".", 1)[0]
+        if station_code.isdigit():
+            station_ids.add(int(station_code))
+    return station_ids
 
 
 def _real_monthly_station_ids() -> set[int]:
     """Возвращает ID станций с реальными месячными данными.
 
     Returns:
-        Множество идентификаторов станций из monthly CSV.
+        Множество идентификаторов станций из нового pack или старого CSV fallback.
     """
+
+    bulk_station_ids = _bulk_monthly_station_ids()
+    if bulk_station_ids:
+        return bulk_station_ids
 
     if not REAL_MONTHLY_CSV.exists():
         return set()

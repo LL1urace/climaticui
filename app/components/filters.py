@@ -382,56 +382,86 @@ def analysis_methods() -> list[str]:
     )
 
 
-def analysis_options(prefix: str = "analysis", station: Any = None, parameter: Any = None) -> dict[str, Any]:
+def analysis_options(
+    prefix: str = "analysis",
+    station: Any = None,
+    parameter: Any = None,
+    methods: list[str] | None = None,
+) -> dict[str, Any]:
     """Отображает дополнительные параметры методов анализа.
 
     Args:
         prefix: Префикс ключей Streamlit-виджетов.
         station: Идентификатор выбранной станции.
         parameter: Идентификатор выбранного климатического параметра.
+        methods: Выбранные методы анализа.
 
     Returns:
         Словарь options для `POST /analysis/run`.
     """
 
-    window = persistent_number_input(
-        "Окно скользящего среднего",
-        key=f"{prefix}_ma_window",
-        default=12,
-        min_value=2,
-        max_value=120,
-        step=1,
-    )
-    extremes_count = persistent_number_input(
-        "Количество экстремумов в таблице",
-        key=f"{prefix}_extremes_count",
-        default=5,
-        min_value=3,
-        max_value=20,
-        step=1,
-    )
-    norm_start, norm_end = date_period(
-        prefix=f"{prefix}_norm",
-        inherit_dashboard=False,
-        remember_dashboard=False,
-    )
-    render_period_availability_notice(
-        [station],
-        [parameter],
-        norm_start,
-        norm_end,
-        label="Период климатической нормы",
-    )
-    options = {
-        "moving_average_window": int(window),
-        "window": int(window),
-        "extremes_count": int(extremes_count),
-        "top_n": int(extremes_count),
-        "seasonal_period": 12,
-    }
-    if norm_start and norm_end:
-        options["norm_period_start"] = norm_start.isoformat()
-        options["norm_period_end"] = norm_end.isoformat()
+    selected_methods = set(methods or [])
+    options: dict[str, Any] = {}
+
+    if not selected_methods:
+        st.caption("Выберите методы анализа, чтобы увидеть их дополнительные параметры.")
+        return options
+
+    if "moving_average" in selected_methods:
+        window = persistent_number_input(
+            "Окно скользящего среднего (moving_average_window / window)",
+            key=f"{prefix}_ma_window",
+            default=12,
+            min_value=2,
+            max_value=120,
+            step=1,
+        )
+        options["moving_average_window"] = int(window)
+        options["window"] = int(window)
+
+    if "seasonal_decomposition" in selected_methods:
+        seasonal_period = persistent_number_input(
+            "Сезонный период (seasonal_period)",
+            key=f"{prefix}_seasonal_period",
+            default=12,
+            min_value=2,
+            max_value=60,
+            step=1,
+        )
+        options["seasonal_period"] = int(seasonal_period)
+
+    if "extremes" in selected_methods:
+        extremes_count = persistent_number_input(
+            "Количество экстремумов в таблице (extremes_count / top_n)",
+            key=f"{prefix}_extremes_count",
+            default=5,
+            min_value=3,
+            max_value=20,
+            step=1,
+        )
+        options["extremes_count"] = int(extremes_count)
+        options["top_n"] = int(extremes_count)
+
+    if {"climate_norm", "anomalies"} & selected_methods:
+        st.markdown("**Период климатической нормы (norm_period_start / norm_period_end)**")
+        norm_start, norm_end = date_period(
+            prefix=f"{prefix}_norm",
+            inherit_dashboard=False,
+            remember_dashboard=False,
+        )
+        render_period_availability_notice(
+            [station],
+            [parameter],
+            norm_start,
+            norm_end,
+            label="Период климатической нормы",
+        )
+        if norm_start and norm_end:
+            options["norm_period_start"] = norm_start.isoformat()
+            options["norm_period_end"] = norm_end.isoformat()
+
+    if not options:
+        st.caption("Для выбранных методов дополнительных параметров нет: используются общие поля страницы.")
     return options
 
 

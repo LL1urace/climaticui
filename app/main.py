@@ -465,9 +465,9 @@ with st.container(key="home-hero"):
         st.markdown(
             """
             <div class="klima-home-visual" aria-label="Минималистичная иллюстрация климатического мониторинга">
-                <span class="klima-float-label klima-label-temp">TEMP −18° / +9°</span>
-                <span class="klima-float-label klima-label-stations">STATIONS ONLINE</span>
-                <span class="klima-float-label klima-label-chart">MONTHLY SIGNAL</span>
+                <span class="klima-float-label klima-label-temp">Температура</span>
+                <span class="klima-float-label klima-label-stations">Метеостанции</span>
+                <span class="klima-float-label klima-label-chart">Месячные ряды</span>
                 <svg viewBox="0 0 360 360" role="img" aria-label="Метеостанция и график климатических данных">
                     <g class="klima-home-sun" fill="none" stroke="#ffd166" stroke-linecap="round" stroke-width="5">
                         <circle cx="284" cy="74" r="25" fill="rgba(255, 209, 102, .2)"/>
